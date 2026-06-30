@@ -1,0 +1,43 @@
+{
+  "id": "habits",
+  "name": "Habits",
+  "version": "1.0.0",
+  "description": "Track daily habits with streaks, a strength score, a calendar heatmap, and per-habit reminders.",
+  "author": "mobius-os",
+  "license": "MIT",
+  "homepage": "https://github.com/mobius-os/app-habits",
+  "entry": "index.jsx",
+  "source_files": [
+    "domain.js",
+    "storage.js",
+    "theme.js",
+    "constants.js",
+    "ui/Chrome.jsx",
+    "ui/Today.jsx",
+    "ui/AllHabits.jsx",
+    "ui/Detail.jsx",
+    "ui/HabitForm.jsx",
+    "ui/Charts.jsx",
+    "ui/Heatmap.jsx"
+  ],
+  "icon": "icon.png",
+  "offline_capable": true,
+  "permissions": {
+    "cross_app_access": "none",
+    "share_with_apps": "none"
+  },
+  "runtime": {
+    "imports": ["react", "recharts"],
+    "esm_deps": []
+  },
+  "offline": {
+    "reads": true,
+    "writes": "queued",
+    "execution": "full"
+  },
+  "schedule": {
+    "default": "* * * * *",
+    "job": "remind.sh"
+  },
+  "embeds_agent": false
+}
