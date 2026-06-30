@@ -18,6 +18,10 @@ export APP_ID DRY_RUN="${DRY_RUN:-0}"
 
 python3 - "$APP_ID" <<'PY'
 import json, os, sys, urllib.request, urllib.error, datetime
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 app_id = sys.argv[1]
 api = os.environ["API_BASE_URL"].rstrip("/")
@@ -33,41 +37,47 @@ def api_get(path):
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
-        raise
+        # any other API error: degrade to "no data" rather than abort the run
+        print(f"reminder: GET {path} failed ({e.code})", file=sys.stderr)
+        return None
+    except (urllib.error.URLError, ValueError) as e:
+        # network failure or malformed JSON — same: degrade, don't crash
+        print(f"reminder: GET {path} failed ({e})", file=sys.stderr)
+        return None
 
 def is_success(h, v):
     if v is None or v == -1:
         return False
     if h.get("type") == "NUMERICAL":
-        tgt = h.get("targetValue") or 1
+        tgt = h.get("targetValue")
+        if tgt is None:
+            tgt = 1  # a real cap of 0 ("none is success") must be preserved
         if h.get("targetType") == "AT_MOST":
             return v / 1000 <= tgt
         return v / 1000 >= tgt
     return v > 0
 
-now = datetime.datetime.now()
-hour, minute, wd = now.hour, now.minute, int(now.strftime("%w"))  # %w: 0=Sun..6=Sat
-today = now.strftime("%Y-%m-%d")
+def now_in(tz_name):
+    # Evaluate "now" in the owner's timezone (captured by the app when the
+    # reminder was set) so an HH:MM set in the browser fires at the right local
+    # wall-clock and reads the right local day. Falls back to container-local
+    # (UTC) when the zone is missing/unknown — the legacy behavior.
+    if tz_name and ZoneInfo is not None:
+        try:
+            return datetime.datetime.now(ZoneInfo(tz_name))
+        except Exception:
+            pass
+    return datetime.datetime.now()
 
 habits = api_get("habits.json") or []
-log = api_get(f"logs/{today}.json") or {}
 
-due = []
-for h in habits:
-    if h.get("archived"):
-        continue
-    r = h.get("reminder")
-    if not r:
-        continue
-    if r.get("hour") != hour or r.get("minute") != minute:
-        continue
-    if not ((r.get("days", 127) >> wd) & 1):
-        continue
-    if h.get("type") == "NUMERICAL" and h.get("targetType") == "AT_MOST":
-        continue  # "stay under" habits are tracked, not nagged
-    if is_success(h, log.get(h["id"])):
-        continue  # already done today
-    due.append(h)
+# Day-logs cached by local date (reminders usually share one timezone, so this
+# is typically a single fetch).
+_log_cache = {}
+def get_log(date):
+    if date not in _log_cache:
+        _log_cache[date] = api_get(f"logs/{date}.json") or {}
+    return _log_cache[date]
 
 def send(title, body):
     payload = {
@@ -79,19 +89,40 @@ def send(title, body):
     }
     if dry:
         print("DRY_RUN would send:", json.dumps(payload))
-        return
+        return True
     data = json.dumps(payload).encode()
     req = urllib.request.Request(f"{api}/api/notifications/send", data=data,
                                  headers={"Authorization": f"Bearer {token}",
                                           "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            r.read()
+        return True
+    except urllib.error.URLError as e:
+        # one throttled/failed send (e.g. a 429 rate-limit on the 11th habit)
+        # must not abort the rest of the batch.
+        print(f"reminder: send '{title}' failed ({e})", file=sys.stderr)
+        return False
 
-for h in due:
+sent = 0
+for h in habits:
+    if h.get("archived"):
+        continue
+    r = h.get("reminder")
+    if not r:
+        continue
+    now = now_in(r.get("tz"))
+    if r.get("hour") != now.hour or r.get("minute") != now.minute:
+        continue
+    if not ((r.get("days", 127) >> int(now.strftime("%w"))) & 1):  # %w: 0=Sun..6=Sat
+        continue
+    if is_success(h, get_log(now.strftime("%Y-%m-%d")).get(h["id"])):
+        continue  # already satisfied today (incl. AT_MOST under cap)
     emoji = h.get("emoji", "")
     title = f"{emoji} {h['name']}".strip()
     body = h.get("question") or f"Time for {h['name']}"
-    send(title, body)
+    if send(title, body):
+        sent += 1
 
-print(f"reminder run {today} {hour:02d}:{minute:02d} — {len(due)} sent" + (" (dry)" if dry else ""))
+print(f"reminder run — {sent} sent" + (" (dry)" if dry else ""))
 PY

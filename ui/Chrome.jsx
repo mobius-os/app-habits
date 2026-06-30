@@ -2,7 +2,46 @@
 // convention so a future library extraction is a grep-and-move. Color comes from
 // theme tokens; per-habit accent is passed as the `--hb-accent` CSS var.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
+
+// The app's own installed icon, rounded and sized to the header. Falls back to
+// an emoji mark before the icon route exists (a fresh dev render, or a 404 on a
+// brand-new install) so the header never shows a broken image. Matches the
+// brand-icon pattern the other Möbius apps use.
+export function AppMark({ appId, fallback = '🔥' }) {
+  const [failed, setFailed] = useState(false);
+  if (failed || !appId) {
+    return <span className="hb-mark" aria-hidden="true">{fallback}</span>;
+  }
+  return (
+    <img
+      className="hb-mark hb-mark-img" src={`/api/apps/${appId}/icon?size=128`}
+      alt="" aria-hidden="true" onError={() => setFailed(true)}
+    />
+  );
+}
+
+// Tracks the visual viewport so a bottom sheet can stay pinned directly above
+// the soft keyboard. The app-frame's viewport meta has no
+// `interactive-widget=resizes-content`, so opening the keyboard does NOT shrink
+// the layout viewport — a bottom-anchored sheet would sit behind the keyboard
+// and the browser would scroll-jump the page to reveal the focused input. We
+// size the scrim to window.visualViewport (offsetTop + height) instead, the
+// same viewport signal app-atlas relies on. Returns null where unsupported, so
+// the CSS `inset: 0` fallback applies unchanged.
+function useVisualViewport() {
+  const [vp, setVp] = useState(null);
+  useEffect(() => {
+    const v = typeof window !== 'undefined' ? window.visualViewport : null;
+    if (!v) return undefined;
+    const sync = () => setVp({ top: Math.max(0, v.offsetTop), height: v.height });
+    sync();
+    v.addEventListener('resize', sync);
+    v.addEventListener('scroll', sync);
+    return () => { v.removeEventListener('resize', sync); v.removeEventListener('scroll', sync); };
+  }, []);
+  return vp;
+}
 
 /* mobius-ui:Ring v1 — strength/progress ring; library candidate. */
 export function Ring({ value, size = 46, stroke = 5, accent, showLabel = true }) {
@@ -31,8 +70,14 @@ export function Ring({ value, size = 46, stroke = 5, accent, showLabel = true })
 
 /* mobius-ui:Sheet v1 — bottom sheet (the app's dialog; no native modals). */
 export function Sheet({ title, onClose, children }) {
+  const vp = useVisualViewport();
+  // Pin the scrim (and so the bottom-anchored sheet) to the visible region
+  // above the keyboard; otherwise fall back to the CSS `inset: 0`.
+  const scrimStyle = vp
+    ? { top: `${vp.top}px`, height: `${vp.height}px`, bottom: 'auto' }
+    : undefined;
   return (
-    <div className="hb-scrim" onClick={onClose} role="dialog" aria-modal="true">
+    <div className="hb-scrim" style={scrimStyle} onClick={onClose} role="dialog" aria-modal="true">
       <div className="hb-sheet" onClick={(e) => e.stopPropagation()}>
         <div className="hb-sheet-grip" aria-hidden="true" />
         {title && <h3 className="hb-sheet-title">{title}</h3>}

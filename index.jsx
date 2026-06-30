@@ -13,7 +13,7 @@ import { Today } from './ui/Today.jsx';
 import { AllHabits } from './ui/AllHabits.jsx';
 import { Detail } from './ui/Detail.jsx';
 import { HabitForm } from './ui/HabitForm.jsx';
-import { ConfirmSheet, NumberEntrySheet } from './ui/Chrome.jsx';
+import { ConfirmSheet, NumberEntrySheet, AppMark } from './ui/Chrome.jsx';
 
 export default function Habits({ appId, token }) {
   const [today, setToday] = useState(() => todayStr());
@@ -82,6 +82,17 @@ export default function Habits({ appId, token }) {
     if (date === today) setTodayLog(updated);
   }, [today]);
 
+  // Relative measured-amount adjust (the Today +/- stepper). Goes through the
+  // store's serialized read-modify-write so rapid taps accumulate; returns the
+  // updated day log so the caller can read the landed value.
+  const adjustValue = useCallback(async (habit, date, deltaRaw) => {
+    const updated = await store.adjustEntry(date, habit.id, deltaRaw);
+    window.mobius.signal?.('item_created', { type: habit.type });
+    setAllLogs((prev) => ({ ...prev, [date]: updated }));
+    if (date === today) setTodayLog(updated);
+    return updated;
+  }, [today]);
+
   const saveHabit = useCallback(async (habit) => {
     const list = habitsRef.current;
     const exists = list.some((h) => h.id === habit.id);
@@ -123,7 +134,7 @@ export default function Habits({ appId, token }) {
         <>
           <header className="hb-header">
             <div className="hb-brand">
-              <span className="hb-mark" aria-hidden="true">🔥</span>
+              <AppMark appId={appId} />
               <h1 className="hb-title">Habits</h1>
             </div>
             <button className="hb-add" onClick={() => setForm({ mode: 'new' })}>+ New</button>
@@ -139,6 +150,7 @@ export default function Habits({ appId, token }) {
               <Today
                 habits={habits} todayLog={todayLog} allLogs={allLogs} today={today}
                 onSetValue={(h, v) => setValue(h, today, v)}
+                onAdjust={(h, deltaRaw) => adjustValue(h, today, deltaRaw)}
                 onOpenDetail={(h) => setDetailId(h.id)}
               />
             ) : (
@@ -175,7 +187,7 @@ export default function Habits({ appId, token }) {
       {numEntry && (
         <NumberEntrySheet
           habit={numEntry.habit} date={numEntry.date}
-          current={(allLogs[numEntry.date] || {})[numEntry.habit.id]}
+          current={((numEntry.date === today ? { ...allLogs[numEntry.date], ...todayLog } : allLogs[numEntry.date]) || {})[numEntry.habit.id]}
           onSave={(raw) => { setValue(numEntry.habit, numEntry.date, raw); setNumEntry(null); }}
           onClear={() => { setValue(numEntry.habit, numEntry.date, null); setNumEntry(null); }}
           onClose={() => setNumEntry(null)}

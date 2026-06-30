@@ -69,6 +69,22 @@ export function setEntry(dateStr, habitId, value) {
   });
 }
 
+// Add a signed delta (in stored x1000 units) to a habit's measured amount for
+// one day, as a serialized read-modify-write so rapid +/- taps accumulate
+// instead of racing on a stale render value — each enqueued adjust reads the
+// previous one's committed result. Clamps at `floor` (amounts can't go below 0).
+// Returns the updated log.
+export function adjustEntry(dateStr, habitId, deltaRaw, floor = 0) {
+  return enqueue(logPath(dateStr), async () => {
+    const log = await getDayLog(dateStr);
+    const cur = log[habitId];
+    const base = typeof cur === 'number' && cur >= 0 ? cur : 0;
+    const next = { ...log, [habitId]: Math.max(floor, base + deltaRaw) };
+    await window.mobius.storage.set(logPath(dateStr), next);
+    return next;
+  });
+}
+
 // Scrub a habit's id from every day-log when the habit is deleted, so its
 // history doesn't linger as orphaned entries (the delete confirm promises this).
 // Best-effort and serialized through the same per-path queue.

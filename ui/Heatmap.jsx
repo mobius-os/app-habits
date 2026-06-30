@@ -64,8 +64,10 @@ export function Heatmap({ habit, entries, today, weeks = 18, onCycle, onEditNumb
               className={`hb-heat-cell${date > today ? ' is-future' : ''}`}
               style={cellStyle(date)}
               onClick={() => tapCell(date)}
+              onKeyDown={date > today ? undefined : (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); tapCell(date); } }}
               title={date}
               role={date > today ? undefined : 'button'}
+              tabIndex={date > today ? undefined : 0}
               aria-label={date > today ? undefined : `Edit ${habit.name} ${date}`}
             />
           ))}

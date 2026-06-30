@@ -44,6 +44,14 @@ export function HabitForm({ initial, onSave, onClose, onDelete }) {
     if (!canSave) return;
     const preset = FREQ_PRESETS[freqIdx];
     const [h, m] = remindTime.split(':').map(Number);
+    // Parse the target explicitly so an AT_MOST cap of 0 ("none is success",
+    // e.g. 0 sodas) survives — `Number(x) || 1` would silently rewrite 0 -> 1.
+    const parsedTarget = Number(targetValue);
+    // The owner's IANA timezone, captured here in the browser, travels with the
+    // reminder so the cron job (which runs in the container's UTC) can fire at
+    // the user's local wall-clock time and read the right local day's log.
+    const tz = (typeof Intl !== 'undefined' && Intl.DateTimeFormat)
+      ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined;
     onSave({
       id: initial?.id || newId(),
       name: name.trim(),
@@ -51,12 +59,12 @@ export function HabitForm({ initial, onSave, onClose, onDelete }) {
       emoji,
       color,
       type,
-      targetValue: type === 'NUMERICAL' ? (Number(targetValue) || 1) : undefined,
+      targetValue: type === 'NUMERICAL' ? (Number.isFinite(parsedTarget) ? parsedTarget : 1) : undefined,
       targetType: type === 'NUMERICAL' ? targetType : undefined,
       unit: type === 'NUMERICAL' ? unit.trim() : undefined,
       freqNum: preset.freqNum,
       freqDen: preset.freqDen,
-      reminder: remindOn ? { hour: h || 0, minute: m || 0, days: remindDays } : null,
+      reminder: remindOn ? { hour: h || 0, minute: m || 0, days: remindDays, tz } : null,
       position: initial?.position ?? Date.now(),
       archived: initial?.archived || false,
       created: initial?.created || todayStr(),

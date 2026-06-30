@@ -88,6 +88,15 @@ test('numerical SKIP is excluded from the EMA too', () => {
   assert.equal(dayCompletion(numAtLeast, { [TODAY]: VALUE.SKIP }, TODAY), null);
 });
 
+test('numerical AT_MOST target 0 ("none is success"): 0 scores 1, any amount scores 0 (no NaN)', () => {
+  const abstain = { type: 'NUMERICAL', targetType: 'AT_MOST', targetValue: 0, freqNum: 1, freqDen: 1, unit: 'cig' };
+  assert.equal(dayCompletion(abstain, { [TODAY]: 0 }, TODAY), 1);     // logged exactly 0 -> success
+  assert.equal(dayCompletion(abstain, { [TODAY]: 3000 }, TODAY), 0);  // any positive amount -> miss
+  const s = strength(abstain, { [TODAY]: 0 }, TODAY);
+  assert.ok(Number.isFinite(s), `strength must not be NaN, got ${s}`);
+  assert.equal(s, 1);
+});
+
 test('currentStreak returns an integer length', () => {
   const e = perfect(TODAY, 5);
   const cs = currentStreak(dailyBool, e, TODAY);
@@ -95,6 +104,21 @@ test('currentStreak returns an integer length', () => {
   assert.equal(cs, 5);
   // a NO today breaks it
   assert.equal(currentStreak(dailyBool, { ...e, [TODAY]: VALUE.NO }, TODAY), 0);
+});
+
+test('currentStreak lapses to 0 once the last success is older than yesterday', () => {
+  // a single success 11 days ago, nothing since -> not a current streak
+  assert.equal(currentStreak(dailyBool, { [d(TODAY, -11)]: VALUE.YES_MANUAL }, TODAY), 0);
+  // a run through yesterday with today still unlogged is in progress
+  const throughYesterday = { [d(TODAY, -2)]: VALUE.YES_MANUAL, [d(TODAY, -1)]: VALUE.YES_MANUAL };
+  assert.equal(currentStreak(dailyBool, throughYesterday, TODAY), 2);
+});
+
+test('currentStreak ignores stray future-dated entries', () => {
+  const e = {};
+  for (let i = 0; i < 7; i++) e[d(TODAY, -i)] = VALUE.YES_MANUAL; // 7-day run ending today
+  e[d(TODAY, 5)] = VALUE.YES_MANUAL;                              // a stray future log
+  assert.equal(currentStreak(dailyBool, e, TODAY), 7);
 });
 
 test('bestStreaks: longest n, most-recent-end tiebreak', () => {

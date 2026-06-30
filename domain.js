@@ -196,11 +196,16 @@ function numericalCompletion(habit, entriesByDate, dateStr) {
   const target = habit.targetValue;
 
   if (habit.targetType === 'AT_MOST') {
-    // c_t = clamp(1 - (amount - target)/target, 0, 1) over today's measured
-    // amount; an unlogged day reads as satisfied (you didn't exceed the cap).
+    // An unlogged day reads as satisfied (you didn't exceed the cap).
     const raw = entriesByDate[dateStr];
     if (raw === undefined || raw === null || raw === VALUE.UNKNOWN) return 1.0;
     const amount = raw / 1000;
+    // A cap of 0 ("none is success") can't be scored proportionally — the
+    // formula below would divide by zero and poison the EMA with NaN. Exactly
+    // zero earns full credit; anything above the cap is a miss.
+    if (target <= 0) return amount <= 0 ? 1 : 0;
+    // c_t = clamp(1 - (amount - target)/target, 0, 1): full credit at/under the
+    // cap, falling to 0 as the amount reaches 2x the cap.
     return clamp(1 - (amount - target) / target, 0, 1);
   }
 
@@ -258,12 +263,16 @@ export function strength(habit, entriesByDate, asOfDateStr) {
 
 // Collect all maximal runs of consecutive success-days across the logged range.
 // Returns [{start, end, length}] ascending by start.
-function allStreaks(habit, entriesByDate) {
+function allStreaks(habit, entriesByDate, capDate) {
   const dates = Object.keys(entriesByDate).sort();
   if (dates.length === 0) return [];
 
   const first = dates[0];
-  const last = dates[dates.length - 1];
+  // Ignore stray future-dated entries (clock skew / multi-device) when a cap is
+  // given, so a future log can't extend a run past the cap day.
+  let last = dates[dates.length - 1];
+  if (capDate && last > capDate) last = capDate;
+  if (last < first) return [];
 
   const streaks = [];
   let runStart = null;
@@ -284,21 +293,22 @@ function allStreaks(habit, entriesByDate) {
   return streaks;
 }
 
-// currentStreak = the length of the streak ending at today, or — if today has
-// no success / no entry — the streak ending at the most recent logged day,
-// provided that run extends up to the last log day. Returns 0 when the most
-// recent activity is not a success.
+// currentStreak = the length of the run ending today (when today is a success),
+// or the run ending yesterday when today simply hasn't been logged yet. A run
+// that ended earlier than yesterday has lapsed (returns 0), as does an explicit
+// miss today. Future-dated entries are ignored (capped at today).
 export function currentStreak(habit, entriesByDate, todayStr) {
-  const streaks = allStreaks(habit, entriesByDate);
+  const streaks = allStreaks(habit, entriesByDate, todayStr);
   if (streaks.length === 0) return 0;
 
   const last = streaks[streaks.length - 1];
   if (last.end === todayStr) return last.length;
 
-  const dates = Object.keys(entriesByDate).sort();
-  const lastLog = dates[dates.length - 1];
-  if (last.end === lastLog && lastLog <= todayStr) return last.length;
-
+  // Today not yet logged: a run through yesterday is still in progress. An
+  // explicit NO/clear today is NOT "unlogged", so it correctly lapses to 0.
+  if (last.end === addDays(todayStr, -1) && valueAt(entriesByDate, todayStr) === VALUE.UNKNOWN) {
+    return last.length;
+  }
   return 0;
 }
 

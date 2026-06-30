@@ -76,13 +76,14 @@ export function AllHabits({ habits, allLogs, todayLog, today, onOpenDetail, onSe
               {cols.map((d) => {
                 const v = valueAt(h.id, d);
                 if (isNum) {
-                  const logged = v !== undefined && v > 0;
+                  const logged = v !== undefined && v !== null && v >= 0;
                   const ok = isSuccess(h, v ?? VALUE.UNKNOWN);
                   return (
                     <td key={d}>
                       <div
                         className={`hb-cell${ok ? ' is-val' : ''}`} onClick={() => onEditNumber(h, d)}
-                        role="button" aria-label={`Edit ${h.name} ${d}`}
+                        role="button" tabIndex={0} aria-label={`Edit ${h.name} ${d}`}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEditNumber(h, d); } }}
                       >{logged ? +(v / 1000).toFixed(1) : ''}</div>
                     </td>
                   );
@@ -96,7 +97,8 @@ export function AllHabits({ habits, allLogs, todayLog, today, onOpenDetail, onSe
                   <td key={d}>
                     <div
                       className={`hb-cell${cls}`} onClick={() => cycle(h, d, v)}
-                      role="button" aria-label={`Toggle ${h.name} ${d}`}
+                      role="button" tabIndex={0} aria-label={`Toggle ${h.name} ${d}`}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycle(h, d, v); } }}
                     >{glyph}</div>
                   </td>
                 );

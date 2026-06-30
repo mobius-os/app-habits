@@ -17,7 +17,7 @@ function streakMessage(streak) {
   return 'Done!';
 }
 
-export function Today({ habits, todayLog, allLogs, today, onSetValue, onOpenDetail }) {
+export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, onOpenDetail }) {
   const [burst, setBurst] = useState(null);     // {colors} | null
   const [toast, setToast] = useState(null);
   const [poppedId, setPoppedId] = useState(null); // habit id mid check-pop (transient)
@@ -35,7 +35,7 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onOpenDeta
     const value = todayLog[h.id];
     const done = h.type === 'NUMERICAL'
       ? isSuccess(h, value === undefined ? VALUE.UNKNOWN : value)
-      : (value || 0) > 0;
+      : (value === VALUE.YES_MANUAL || value === VALUE.YES_AUTO);
     return {
       habit: h, value, done,
       strength: strength(h, entries, today),
@@ -60,7 +60,7 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onOpenDeta
 
   function toggleBool(s) {
     const h = s.habit;
-    if ((s.value || 0) > 0) {
+    if (s.value === VALUE.YES_MANUAL || s.value === VALUE.YES_AUTO) {
       onSetValue(h, null); // clear -> UNKNOWN (a quick un-check; explicit NO/SKIP live in the grid)
     } else {
       const projected = currentStreak(h, { ...s.entries, [today]: VALUE.YES_MANUAL }, today);
@@ -69,14 +69,15 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onOpenDeta
     }
   }
 
-  function stepMeasurable(s, delta) {
+  // Relative read-modify-write through the store so rapid +/- taps accumulate
+  // instead of racing on the stale render value — each tap adds to the previous
+  // serialized result, not to s.value. The store clamps the floor at 0.
+  async function stepMeasurable(s, deltaUnits) {
     const h = s.habit;
-    const base = s.value === undefined ? 0 : s.value / 1000;
-    const next = Math.max(0, Math.round((base + delta) * 1000) / 1000);
-    const raw = Math.round(next * 1000); // 0 is a real, recordable value (esp. AT_MOST)
     const wasDone = s.done;
-    onSetValue(h, raw);
-    if (isSuccess(h, raw) && !wasDone) {
+    const updated = await onAdjust(h, Math.round(deltaUnits * 1000));
+    const raw = updated ? updated[h.id] : undefined;
+    if (raw != null && isSuccess(h, raw) && !wasDone) {
       celebrate(h, currentStreak(h, { ...s.entries, [today]: raw }, today));
     }
   }

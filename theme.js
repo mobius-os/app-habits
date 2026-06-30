@@ -16,6 +16,8 @@ export const CSS = `
 .hb-mark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 11px; display: flex;
   align-items: center; justify-content: center; font-size: 19px;
   background: linear-gradient(150deg, #10b981, #f59e0b); box-shadow: 0 4px 14px rgba(16,185,129,0.35); }
+/* the real installed icon variant — show the logo itself, no gradient tile */
+.hb-mark-img { object-fit: contain; background: none; box-shadow: none; }
 .hb-title { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .hb-add { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px;
   border: none; border-radius: 12px; background: var(--accent); color: var(--accent-fg);
