@@ -65,12 +65,12 @@ def api_get_text(path):
         return raw
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return ""
+            return ""  # file legitimately absent — an empty history, safe to append to
         errors.append(f"GET {path} failed ({e.code})")
-        return ""
+        return None  # transport failure — the caller must NOT treat this as empty
     except urllib.error.URLError as e:
         errors.append(f"GET {path} failed ({e})")
-        return ""
+        return None
 
 def api_put_text(path, text):
     data = json.dumps({"content": text}).encode()
@@ -92,11 +92,20 @@ def signal(name, payload):
         "ts": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     current = api_get_text("signals.jsonl")
+    if current is None:
+        # Read failed: writing would replace the whole history with this one
+        # line. Signals are fire-and-forget — dropping one beats truncation.
+        return
     api_put_text("signals.jsonl", current + json.dumps(record, separators=(",", ":")) + "\n")
 
 def is_success(h, v):
     if v is None or v == -1:
         return False
+    if v == 3:
+        # SKIP sentinel (VALUE.SKIP in domain.js) — stored RAW, not x1000, for
+        # both habit types. A skipped day is satisfied (no reminder), mirroring
+        # domain.js isSuccess; without this a numeric SKIP reads as 3/1000.
+        return True
     if h.get("type") == "NUMERICAL":
         tgt = h.get("targetValue")
         if tgt is None:
@@ -179,6 +188,12 @@ for h in habits:
 
 status = "error" if errors else "ok"
 message = "; ".join(errors[:2]) if errors else ("dry run" if dry else "ok")
-signal("cron_summary", {"status": status, "sent": sent, "checked": checked, "message": message[:120]})
+# This job runs EVERY MINUTE; an unconditional summary is 1,440 rows/day of
+# noise in Reflection's digest. Emit only when the run did something (sent or
+# dry), failed, or as the once-a-day 00:00 container-time heartbeat that tells
+# Reflection the job is alive at all.
+_n = datetime.datetime.now()
+if errors or sent or dry or (_n.hour == 0 and _n.minute == 0):
+    signal("cron_summary", {"status": status, "sent": sent, "checked": checked, "message": message[:120]})
 print(f"reminder run — {sent} sent, {checked} checked" + (" (dry)" if dry else ""))
 PY
