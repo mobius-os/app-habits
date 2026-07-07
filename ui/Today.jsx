@@ -18,7 +18,7 @@ function streakMessage(streak) {
 }
 
 export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, onOpenDetail }) {
-  const [burst, setBurst] = useState(null);     // {colors} | null
+  const [burst, setBurst] = useState(null);     // {id, colors} | null
   const [toast, setToast] = useState(null);
   const [poppedId, setPoppedId] = useState(null); // habit id mid check-pop (transient)
   const timers = useRef([]);
@@ -49,22 +49,31 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
   const topStreak = stats.reduce((m, s) => Math.max(m, s.streak), 0);
   const pct = total ? Math.round((doneCount / total) * 100) : 0;
 
+  function signalDayComplete(wasDone) {
+    if (!wasDone && total > 0 && doneCount === total - 1) {
+      window.mobius?.signal?.('day_completed', { done: total, total });
+    }
+  }
+
   function celebrate(h, projectedStreak) {
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
     setPoppedId(h.id);
-    setBurst({ colors: [accent(h.color), '#f59e0b', '#10b981', '#ffffff'] });
+    setBurst({ id: `${h.id}-${Date.now()}`, colors: [accent(h.color), '#f59e0b', '#10b981', '#ffffff'] });
     setToast(streakMessage(projectedStreak));
     timers.current.push(setTimeout(() => setPoppedId(null), 480));
     timers.current.push(setTimeout(() => setBurst(null), 1200));
     timers.current.push(setTimeout(() => setToast(null), 2100));
   }
 
-  function toggleBool(s) {
+  async function toggleBool(s) {
     const h = s.habit;
     if (s.value === VALUE.YES_MANUAL || s.value === VALUE.YES_AUTO) {
-      onSetValue(h, null); // clear -> UNKNOWN (a quick un-check; explicit NO/SKIP live in the grid)
+      await onSetValue(h, null); // clear -> UNKNOWN (a quick un-check; explicit NO/SKIP live in the grid)
     } else {
       const projected = currentStreak(h, { ...s.entries, [today]: VALUE.YES_MANUAL }, today);
-      onSetValue(h, VALUE.YES_MANUAL);
+      await onSetValue(h, VALUE.YES_MANUAL);
+      signalDayComplete(s.done);
       celebrate(h, projected);
     }
   }
@@ -78,6 +87,7 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
     const updated = await onAdjust(h, Math.round(deltaUnits * 1000));
     const raw = updated ? updated[h.id] : undefined;
     if (raw != null && isSuccess(h, raw) && !wasDone) {
+      signalDayComplete(wasDone);
       celebrate(h, currentStreak(h, { ...s.entries, [today]: raw }, today));
     }
   }
@@ -94,7 +104,7 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
 
   return (
     <>
-      {burst && <Confetti colors={burst.colors} />}
+      {burst && <Confetti key={burst.id} colors={burst.colors} />}
       {toast && <Toast text={toast} />}
 
       <div className="hb-hero">

@@ -5,7 +5,7 @@
 // This file is the thin shell: storage wiring, tab/detail navigation, and the
 // add/edit/delete lifecycle. Screens live under ui/, pure logic in domain.js.
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { Component, useState, useEffect, useCallback, useRef } from 'react';
 import { CSS } from './theme.js';
 import * as store from './storage.js';
 import { todayStr } from './storage.js';
@@ -14,6 +14,61 @@ import { AllHabits } from './ui/AllHabits.jsx';
 import { Detail } from './ui/Detail.jsx';
 import { HabitForm } from './ui/HabitForm.jsx';
 import { ConfirmSheet, NumberEntrySheet, AppMark } from './ui/Chrome.jsx';
+import { currentStreak } from './domain.js';
+
+function signal(name, payload) {
+  window.mobius?.signal?.(name, payload);
+}
+
+function errorMessage(err) {
+  return err && err.message ? String(err.message).slice(0, 140) : 'Unknown error';
+}
+
+function reportError(err, source) {
+  signal('error', { message: errorMessage(err), source });
+}
+
+function logStatus(value) {
+  if (value === null || value === undefined) return 'clear';
+  if (value === 0) return 'no';
+  if (value === 3) return 'skip';
+  if (value === 1 || value === 2) return 'yes';
+  return 'value';
+}
+
+function daysAgo(today, date) {
+  const [ty, tm, td] = today.split('-').map(Number);
+  const [dy, dm, dd] = date.split('-').map(Number);
+  return Math.round((new Date(ty, tm - 1, td) - new Date(dy, dm - 1, dd)) / 86400000);
+}
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  componentDidCatch(err) {
+    reportError(err, 'render');
+    this.setState({ failed: true });
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <div className="hb-root">
+          <style>{CSS}</style>
+          <div className="hb-empty">
+            <div className="hb-empty-mark" aria-hidden="true">!</div>
+            <div className="hb-empty-title">Habits hit an error</div>
+            <p className="hb-empty-text">Close and reopen the app to try again.</p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function Habits({ appId, token }) {
   const [today, setToday] = useState(() => todayStr());
@@ -28,15 +83,30 @@ export default function Habits({ appId, token }) {
   const [online, setOnline] = useState(true);
   const habitsRef = useRef([]);
   const readyFired = useRef(false);
+  const habitsLoaded = useRef(false);
+  const historyLoaded = useRef(false);
+
+  const maybeReady = useCallback(() => {
+    if (!readyFired.current && habitsLoaded.current && historyLoaded.current) {
+      readyFired.current = true;
+      signal('app_ready', { item_count: habitsRef.current.length });
+    }
+  }, []);
 
   // habits subscription (live)
   useEffect(() => {
-    const u = store.subscribeHabits((list) => { habitsRef.current = list; setHabits(list); });
+    const u = store.subscribeHabits((list) => {
+      habitsRef.current = list;
+      setHabits(list);
+      habitsLoaded.current = true;
+      maybeReady();
+    });
     return () => { if (u) u(); };
-  }, []);
+  }, [maybeReady]);
 
   // today's log subscription — re-bound when `today` rolls over past midnight
   useEffect(() => {
+    setTodayLog({});
     const u = store.subscribeDayLog(today, setTodayLog);
     return () => { if (u) u(); };
   }, [today]);
@@ -45,13 +115,17 @@ export default function Habits({ appId, token }) {
   // app_ready fires once history has actually loaded.
   const reloadAll = useCallback(() => {
     store.loadAllLogs().then((logs) => {
-      setAllLogs(logs);
-      if (!readyFired.current) {
-        readyFired.current = true;
-        window.mobius.signal?.('app_ready', { item_count: habitsRef.current.length });
+      if (logs === null) {
+        reportError(new Error('Unable to list habit history'), 'reloadAll');
+        return;
       }
+      setAllLogs(logs);
+      historyLoaded.current = true;
+      maybeReady();
+    }).catch((err) => {
+      reportError(err, 'reloadAll');
     });
-  }, []);
+  }, [maybeReady]);
   useEffect(() => { reloadAll(); }, [reloadAll]);
 
   // midnight rollover + regain-focus refresh: recompute `today` so the first tap
@@ -76,49 +150,101 @@ export default function Habits({ appId, token }) {
   // than re-fetching — this avoids the out-of-order refresh race (a refetch
   // started before an earlier write can land after it and revert state).
   const setValue = useCallback(async (habit, date, value) => {
-    const updated = await store.setEntry(date, habit.id, value);
-    if (value !== null && value !== undefined) window.mobius.signal?.('item_created', { type: habit.type });
-    setAllLogs((prev) => ({ ...prev, [date]: updated }));
-    if (date === today) setTodayLog(updated);
-  }, [today]);
+    const baseLogs = { ...allLogs, ...(date === today ? { [today]: { ...(allLogs[today] || {}), ...todayLog } } : {}) };
+    const prevStreak = currentStreak(habit, store.entriesForHabit(baseLogs, habit.id), today);
+    try {
+      const updated = await store.setEntry(date, habit.id, value);
+      const nextLogs = { ...baseLogs, [date]: updated };
+      const nextStreak = currentStreak(habit, store.entriesForHabit(nextLogs, habit.id), today);
+      signal('item_updated', { type: 'habit_log', habit_type: habit.type, status: logStatus(value) });
+      if (prevStreak > 0 && nextStreak === 0) {
+        signal('streak_broken', { habit_type: habit.type, length: prevStreak, freq: `${habit.freqNum}/${habit.freqDen}` });
+      }
+      const backfillDays = daysAgo(today, date);
+      if (backfillDays > 0) signal('backfill_used', { days_ago: backfillDays });
+      setAllLogs((prev) => ({ ...prev, [date]: updated }));
+      if (date === today) setTodayLog(updated);
+    } catch (err) {
+      reportError(err, 'setValue');
+      throw err;
+    }
+  }, [allLogs, todayLog, today]);
 
   // Relative measured-amount adjust (the Today +/- stepper). Goes through the
   // store's serialized read-modify-write so rapid taps accumulate; returns the
   // updated day log so the caller can read the landed value.
   const adjustValue = useCallback(async (habit, date, deltaRaw) => {
-    const updated = await store.adjustEntry(date, habit.id, deltaRaw);
-    window.mobius.signal?.('item_created', { type: habit.type });
-    setAllLogs((prev) => ({ ...prev, [date]: updated }));
-    if (date === today) setTodayLog(updated);
-    return updated;
-  }, [today]);
+    const baseLogs = { ...allLogs, ...(date === today ? { [today]: { ...(allLogs[today] || {}), ...todayLog } } : {}) };
+    const prevLog = baseLogs[date] || {};
+    const prevValue = prevLog[habit.id];
+    const prevStreak = currentStreak(habit, store.entriesForHabit(baseLogs, habit.id), today);
+    try {
+      const updated = await store.adjustEntry(date, habit.id, deltaRaw);
+      const nextValue = updated ? updated[habit.id] : undefined;
+      if (nextValue !== prevValue) {
+        const nextLogs = { ...baseLogs, [date]: updated };
+        const nextStreak = currentStreak(habit, store.entriesForHabit(nextLogs, habit.id), today);
+        signal('item_updated', { type: 'habit_log', habit_type: habit.type, status: 'value' });
+        if (prevStreak > 0 && nextStreak === 0) {
+          signal('streak_broken', { habit_type: habit.type, length: prevStreak, freq: `${habit.freqNum}/${habit.freqDen}` });
+        }
+        const backfillDays = daysAgo(today, date);
+        if (backfillDays > 0) signal('backfill_used', { days_ago: backfillDays });
+      }
+      setAllLogs((prev) => ({ ...prev, [date]: updated }));
+      if (date === today) setTodayLog(updated);
+      return updated;
+    } catch (err) {
+      reportError(err, 'adjustValue');
+      throw err;
+    }
+  }, [allLogs, todayLog, today]);
 
   const saveHabit = useCallback(async (habit) => {
     const list = habitsRef.current;
     const exists = list.some((h) => h.id === habit.id);
     const next = exists ? list.map((h) => (h.id === habit.id ? habit : h)) : [...list, habit];
-    await store.saveHabits(next);
-    setForm(null);
+    try {
+      await store.saveHabits(next);
+      if (!exists) {
+        signal('item_created', {
+          type: 'habit',
+          habit_type: habit.type,
+          freq: `${habit.freqNum}/${habit.freqDen}`,
+          has_reminder: !!habit.reminder,
+        });
+      }
+      setForm(null);
+    } catch (err) {
+      reportError(err, 'saveHabit');
+      throw err;
+    }
   }, []);
 
   const deleteHabit = useCallback(async (id) => {
-    await store.saveHabits(habitsRef.current.filter((h) => h.id !== id));
-    await store.purgeHabit(id);   // scrub the habit's id from every day-log
-    window.mobius.signal?.('item_deleted');
-    setAllLogs((prev) => {
-      const copy = {};
-      for (const [d, log] of Object.entries(prev)) {
-        const { [id]: _drop, ...rest } = log;
-        copy[d] = rest;
-      }
-      return copy;
-    });
-    setConfirmDel(null); setForm(null); setDetailId(null);
+    try {
+      await store.saveHabits(habitsRef.current.filter((h) => h.id !== id));
+      await store.purgeHabit(id);   // scrub the habit's id from every day-log
+      signal('item_deleted', { type: 'habit' });
+      setAllLogs((prev) => {
+        const copy = {};
+        for (const [d, log] of Object.entries(prev)) {
+          const { [id]: _drop, ...rest } = log;
+          copy[d] = rest;
+        }
+        return copy;
+      });
+      setConfirmDel(null); setForm(null); setDetailId(null);
+    } catch (err) {
+      reportError(err, 'deleteHabit');
+      throw err;
+    }
   }, []);
 
   const detailHabit = habits.find((h) => h.id === detailId);
 
   return (
+    <ErrorBoundary>
     <div className="hb-root">
       <style>{CSS}</style>
 
@@ -161,7 +287,7 @@ export default function Habits({ appId, token }) {
                 onEditNumber={(h, d) => setNumEntry({ habit: h, date: d })}
               />
             )}
-            {!online && <div className="hb-offline" aria-live="polite">● Offline</div>}
+            {!online && <div className="hb-offline" aria-live="polite">Offline</div>}
           </div>
         </>
       )}
@@ -194,5 +320,6 @@ export default function Habits({ appId, token }) {
         />
       )}
     </div>
+    </ErrorBoundary>
   );
 }

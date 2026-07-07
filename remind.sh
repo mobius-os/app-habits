@@ -27,6 +27,7 @@ app_id = sys.argv[1]
 api = os.environ["API_BASE_URL"].rstrip("/")
 token = os.environ.get("SERVICE_TOKEN", "")
 dry = os.environ.get("DRY_RUN", "0") == "1"
+errors = []
 
 def api_get(path):
     req = urllib.request.Request(f"{api}/api/storage/apps/{app_id}/{path}",
@@ -38,12 +39,60 @@ def api_get(path):
         if e.code == 404:
             return None
         # any other API error: degrade to "no data" rather than abort the run
-        print(f"reminder: GET {path} failed ({e.code})", file=sys.stderr)
+        msg = f"GET {path} failed ({e.code})"
+        errors.append(msg)
+        print(f"reminder: {msg}", file=sys.stderr)
         return None
     except (urllib.error.URLError, ValueError) as e:
         # network failure or malformed JSON — same: degrade, don't crash
-        print(f"reminder: GET {path} failed ({e})", file=sys.stderr)
+        msg = f"GET {path} failed ({e})"
+        errors.append(msg)
+        print(f"reminder: {msg}", file=sys.stderr)
         return None
+
+def api_get_text(path):
+    req = urllib.request.Request(f"{api}/api/storage/apps/{app_id}/{path}",
+                                 headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            raw = r.read().decode()
+        try:
+            body = json.loads(raw or "null")
+            if isinstance(body, dict) and isinstance(body.get("content"), str):
+                return body["content"]
+        except ValueError:
+            pass
+        return raw
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return ""
+        errors.append(f"GET {path} failed ({e.code})")
+        return ""
+    except urllib.error.URLError as e:
+        errors.append(f"GET {path} failed ({e})")
+        return ""
+
+def api_put_text(path, text):
+    data = json.dumps({"content": text}).encode()
+    req = urllib.request.Request(f"{api}/api/storage/apps/{app_id}/{path}", data=data, method="PUT",
+                                 headers={"Authorization": f"Bearer {token}",
+                                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            r.read()
+        return True
+    except urllib.error.URLError as e:
+        print(f"reminder: PUT {path} failed ({e})", file=sys.stderr)
+        return False
+
+def signal(name, payload):
+    record = {
+        "name": name,
+        "payload": payload,
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    current = api_get_text("signals.jsonl")
+    api_put_text("signals.jsonl", current + json.dumps(record, separators=(",", ":")) + "\n")
 
 def is_success(h, v):
     if v is None or v == -1:
@@ -101,10 +150,13 @@ def send(title, body):
     except urllib.error.URLError as e:
         # one throttled/failed send (e.g. a 429 rate-limit on the 11th habit)
         # must not abort the rest of the batch.
+        msg = f"send failed ({e})"
+        errors.append(msg)
         print(f"reminder: send '{title}' failed ({e})", file=sys.stderr)
         return False
 
 sent = 0
+checked = 0
 for h in habits:
     if h.get("archived"):
         continue
@@ -118,11 +170,15 @@ for h in habits:
         continue
     if is_success(h, get_log(now.strftime("%Y-%m-%d")).get(h["id"])):
         continue  # already satisfied today (incl. AT_MOST under cap)
+    checked += 1
     emoji = h.get("emoji", "")
     title = f"{emoji} {h['name']}".strip()
     body = h.get("question") or f"Time for {h['name']}"
     if send(title, body):
         sent += 1
 
-print(f"reminder run — {sent} sent" + (" (dry)" if dry else ""))
+status = "error" if errors else "ok"
+message = "; ".join(errors[:2]) if errors else ("dry run" if dry else "ok")
+signal("cron_summary", {"status": status, "sent": sent, "checked": checked, "message": message[:120]})
+print(f"reminder run — {sent} sent, {checked} checked" + (" (dry)" if dry else ""))
 PY
