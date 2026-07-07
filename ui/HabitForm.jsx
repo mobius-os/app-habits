@@ -17,6 +17,14 @@ function newId() {
 
 export function HabitForm({ initial, onSave, onClose, onDelete }) {
   const editing = !!initial;
+  const freqOptions = (() => {
+    const i = FREQ_PRESETS.findIndex((p) => p.freqNum === initial?.freqNum && p.freqDen === initial?.freqDen);
+    if (!initial || i >= 0) return FREQ_PRESETS;
+    return [
+      { label: `${initial.freqNum}x per ${initial.freqDen} days (current)`, freqNum: initial.freqNum, freqDen: initial.freqDen },
+      ...FREQ_PRESETS,
+    ];
+  })();
   const [name, setName] = useState(initial?.name || '');
   const [question, setQuestion] = useState(initial?.question || '');
   const [emoji, setEmoji] = useState(initial?.emoji || '🔥');
@@ -26,7 +34,7 @@ export function HabitForm({ initial, onSave, onClose, onDelete }) {
   const [targetType, setTargetType] = useState(initial?.targetType || 'AT_LEAST');
   const [unit, setUnit] = useState(initial?.unit || '');
   const [freqIdx, setFreqIdx] = useState(() => {
-    const i = FREQ_PRESETS.findIndex((p) => p.freqNum === initial?.freqNum && p.freqDen === initial?.freqDen);
+    const i = freqOptions.findIndex((p) => p.freqNum === initial?.freqNum && p.freqDen === initial?.freqDen);
     return i >= 0 ? i : 0;
   });
   const [remindOn, setRemindOn] = useState(!!initial?.reminder);
@@ -42,7 +50,7 @@ export function HabitForm({ initial, onSave, onClose, onDelete }) {
 
   function save() {
     if (!canSave) return;
-    const preset = FREQ_PRESETS[freqIdx];
+    const preset = freqOptions[freqIdx];
     const [h, m] = remindTime.split(':').map(Number);
     // Parse the target explicitly so an AT_MOST cap of 0 ("none is success",
     // e.g. 0 sodas) survives — `Number(x) || 1` would silently rewrite 0 -> 1.
@@ -135,7 +143,7 @@ export function HabitForm({ initial, onSave, onClose, onDelete }) {
       <div className="hb-field">
         <label className="hb-label">How often</label>
         <select className="hb-input" value={freqIdx} onChange={(e) => setFreqIdx(Number(e.target.value))} aria-label="Frequency">
-          {FREQ_PRESETS.map((p, i) => <option key={p.label} value={i}>{p.label}</option>)}
+          {freqOptions.map((p, i) => <option key={p.label} value={i}>{p.label}</option>)}
         </select>
       </div>
 

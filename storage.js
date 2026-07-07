@@ -90,6 +90,7 @@ export function adjustEntry(dateStr, habitId, deltaRaw, floor = 0) {
 // Best-effort and serialized through the same per-path queue.
 export async function purgeHabit(habitId) {
   const all = await loadAllLogs();
+  if (all === null) return;
   await Promise.all(
     Object.entries(all).map(([dateStr, log]) => {
       if (!Object.prototype.hasOwnProperty.call(log, habitId)) return null;
@@ -107,6 +108,7 @@ export async function purgeHabit(habitId) {
 // Enumerate every day-log and read it into { 'YYYY-MM-DD': { habitId: value } }.
 export async function loadAllLogs() {
   const entries = await window.mobius.storage.list('logs/');
+  if (entries === null) return null;
   if (!entries) return {};
   const out = {};
   await Promise.all(

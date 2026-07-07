@@ -109,7 +109,7 @@ export function Confetti({ colors = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6',
       bg: colors[i % colors.length],
       delay: Math.round(Math.random() * 140),
     })),
-    [],
+    [colors],
   );
   return (
     <div className="hb-burst" aria-hidden="true">
@@ -133,6 +133,9 @@ export function Toast({ text }) {
 export function NumberEntrySheet({ habit, date, current, onSave, onClear, onClose }) {
   const logged = current !== undefined && current !== null && current >= 0;
   const [val, setVal] = useState(logged ? String(current / 1000) : '');
+  const trimmed = val.trim();
+  const parsed = Number(trimmed);
+  const canSave = trimmed !== '' && Number.isFinite(parsed);
   return (
     <Sheet title={`${habit.emoji} ${habit.name}`} onClose={onClose}>
       <div className="hb-section-sub" style={{ margin: 0 }}>{date}</div>
@@ -146,7 +149,8 @@ export function NumberEntrySheet({ habit, date, current, onSave, onClear, onClos
         {logged && <button className="hb-btn hb-btn-danger" onClick={onClear}>Clear</button>}
         <button
           className="hb-btn hb-btn-primary"
-          onClick={() => onSave(Math.max(0, Math.round((Number(val) || 0) * 1000)))}
+          onClick={() => { if (canSave) onSave(Math.max(0, Math.round(parsed * 1000))); }}
+          disabled={!canSave}
         >Save</button>
       </div>
     </Sheet>

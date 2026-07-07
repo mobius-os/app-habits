@@ -67,6 +67,17 @@ test('non-daily boolean: 3 checks in a 3x/week period read as satisfied (YES_AUT
   assert.ok(c1 < 0.5 && c1 > 0, `1 check completion ${c1}`);
 });
 
+test('non-daily boolean streaks use YES_AUTO fill for current and best streaks', () => {
+  const friday = '2024-03-29';
+  const three = {
+    [d(friday, -4)]: VALUE.YES_MANUAL, // Monday
+    [d(friday, -2)]: VALUE.YES_MANUAL, // Wednesday
+    [friday]: VALUE.YES_MANUAL,
+  };
+  assert.equal(currentStreak(weekly3, three, friday), 5);
+  assert.deepEqual(bestStreaks(weekly3, three, 1), [{ start: d(friday, -4), end: friday, length: 5 }]);
+});
+
 test('numerical AT_LEAST completion fraction', () => {
   assert.ok(Math.abs(dayCompletion(numAtLeast, { [TODAY]: 1000 }, TODAY) - 0.5) < 1e-9); // 1.0 of target 2
   assert.equal(dayCompletion(numAtLeast, { [TODAY]: 2000 }, TODAY), 1);                  // hit target
@@ -86,6 +97,8 @@ test('numerical AT_MOST: seeds at 1.0, under cap stays satisfied, over cap drops
 
 test('numerical SKIP is excluded from the EMA too', () => {
   assert.equal(dayCompletion(numAtLeast, { [TODAY]: VALUE.SKIP }, TODAY), null);
+  assert.equal(isSuccess(numAtLeast, VALUE.SKIP), true);
+  assert.equal(currentStreak(numAtLeast, { [d(TODAY, -1)]: 2000, [TODAY]: VALUE.SKIP }, TODAY), 2);
 });
 
 test('numerical AT_MOST target 0 ("none is success"): 0 scores 1, any amount scores 0 (no NaN)', () => {

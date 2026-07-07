@@ -87,6 +87,7 @@ function scoreSeed(habit) {
 //  - numerical AT_LEAST: logged AND amount >= target.
 //  - numerical AT_MOST: logged (not UNKNOWN) AND amount <= target.
 export function isSuccess(habit, value) {
+  if (value === VALUE.SKIP) return true;
   if (habit.type === 'NUMERICAL') {
     if (habit.targetType === 'AT_MOST') {
       return value !== VALUE.UNKNOWN && value / 1000 <= habit.targetValue;
@@ -274,11 +275,16 @@ function allStreaks(habit, entriesByDate, capDate) {
   if (capDate && last > capDate) last = capDate;
   if (last < first) return [];
 
+  let entries = entriesByDate;
+  if (habit.type !== 'NUMERICAL' && frequencyToFloat(habit) < 1) {
+    entries = applyAutoFill(entriesByDate, first, last, habit.freqNum * 2, habit.freqDen * 2);
+  }
+
   const streaks = [];
   let runStart = null;
   let prev = null;
   for (const date of dateRange(first, last)) {
-    const success = isSuccess(habit, valueAt(entriesByDate, date));
+    const success = isSuccess(habit, valueAt(entries, date));
     if (success) {
       if (runStart === null) runStart = date;
       prev = date;
