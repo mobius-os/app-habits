@@ -31,8 +31,8 @@ ui/
   Today.jsx      # the Today card list + celebration
   AllHabits.jsx  # the dense multi-day grid
   Detail.jsx     # KPIs + charts + heatmap + best streaks + frequency
-  HabitForm.jsx  # add / edit bottom sheet
   Charts.jsx     # recharts wrappers (score curve + history bars)
+  HabitForm.jsx  # add / edit bottom sheet
   Heatmap.jsx    # the contribution calendar
 remind.sh        # per-habit reminder cron job
 ```
@@ -46,9 +46,14 @@ locally and your edits survive store updates.
 - `habits.json` — the array of habits.
 - `logs/<YYYY-MM-DD>.json` — one file per day, `{ habitId: value }` (last-write-wins
   per path, so concurrent edits to different days never clobber).
+- `signals.jsonl` — app analytics emitted through `window.mobius.signal()` and
+  the reminder cron summary.
 
-Value encoding and the strength/streak math live in `domain.js` and match Loop
-Habit Tracker (verified against its `ScoreTest.kt`).
+Value encoding is shared by the UI, tests, and reminder cron: `-1` unknown,
+`0` no, `1` auto-filled yes, `2` manual yes, `3` skip, and measurable amounts
+stored as `amount * 1000`. The strength/streak math lives in `domain.js` and
+matches Loop Habit Tracker semantics, including non-daily yes/no auto-fill and
+skip days preserving streaks.
 
 ## Reminders
 
@@ -60,7 +65,7 @@ prints the payload instead of sending a real notification).
 ## Development
 
 ```bash
-node --test            # run the domain unit tests (10 tests)
+npm test               # run the domain unit tests
 ```
 
 The app is pure JSX + the `react` and `recharts` import-map libraries; there is no
