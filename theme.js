@@ -12,7 +12,7 @@ export const CSS = `
 
 /* header */
 .hb-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: 14px 16px 10px; }
+  gap: 12px; padding: calc(14px + env(safe-area-inset-top)) 16px 10px; }
 .hb-brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .hb-mark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 11px; display: flex;
   align-items: center; justify-content: center; font-size: 19px;
@@ -36,7 +36,7 @@ export const CSS = `
 
 /* scroll body */
 .hb-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
-  padding: 4px 16px 40px; display: flex; flex-direction: column; gap: 12px;
+  padding: 4px 16px calc(40px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px;
   overscroll-behavior-y: contain; }
 
 /* hero strip */
@@ -195,7 +195,7 @@ export const CSS = `
   border-color: transparent; color: color-mix(in srgb, var(--hb-accent) 80%, var(--text)); }
 
 /* detail */
-.hb-detail-head { flex: 0 0 auto; display: flex; align-items: center; gap: 11px; padding: 12px 12px 8px;
+.hb-detail-head { flex: 0 0 auto; display: flex; align-items: center; gap: 11px; padding: calc(12px + env(safe-area-inset-top)) 12px 8px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--hb-accent) 16%, var(--bg)), var(--bg)); }
 .hb-back { width: 44px; height: 44px; border-radius: 12px; border: none; background: var(--surface);
   color: var(--text); font-size: 20px; cursor: pointer; flex: 0 0 auto; }
