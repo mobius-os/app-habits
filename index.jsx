@@ -28,6 +28,11 @@ function reportError(err, source) {
   signal('error', { message: errorMessage(err), source });
 }
 
+function closeNavHandle(ref) {
+  try { ref.current?.close?.(); } catch {}
+  ref.current = null;
+}
+
 function logStatus(value) {
   if (value === null || value === undefined) return 'clear';
   if (value === 0) return 'no';
@@ -85,6 +90,78 @@ export default function Habits({ appId, token }) {
   const readyFired = useRef(false);
   const habitsLoaded = useRef(false);
   const historyLoaded = useRef(false);
+  const detailNavRef = useRef(null);
+  const formNavRef = useRef(null);
+  const confirmNavRef = useRef(null);
+  const numEntryNavRef = useRef(null);
+
+  const openNavHandle = useCallback(async (ref, label, onBack) => {
+    closeNavHandle(ref);
+    if (!window.mobius?.nav?.open) return true;
+    let handle = null;
+    try {
+      handle = window.mobius.nav.open(label, onBack);
+      ref.current = handle;
+      await handle.ready;
+      return ref.current === handle;
+    } catch (err) {
+      if (ref.current === handle) ref.current = null;
+      reportError(err, 'nav');
+      return false;
+    }
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    closeNavHandle(detailNavRef);
+    setDetailId(null);
+  }, []);
+
+  const openDetail = useCallback(async (habit) => {
+    const ok = await openNavHandle(detailNavRef, 'habits-detail', () => {
+      detailNavRef.current = null;
+      setDetailId(null);
+    });
+    if (ok) setDetailId(habit.id);
+  }, [openNavHandle]);
+
+  const closeForm = useCallback(() => {
+    closeNavHandle(formNavRef);
+    setForm(null);
+  }, []);
+
+  const openForm = useCallback(async (nextForm) => {
+    const ok = await openNavHandle(formNavRef, 'habits-form', () => {
+      formNavRef.current = null;
+      setForm(null);
+    });
+    if (ok) setForm(nextForm);
+  }, [openNavHandle]);
+
+  const closeConfirm = useCallback(() => {
+    closeNavHandle(confirmNavRef);
+    setConfirmDel(null);
+  }, []);
+
+  const openConfirm = useCallback(async (habit) => {
+    const ok = await openNavHandle(confirmNavRef, 'habits-confirm-delete', () => {
+      confirmNavRef.current = null;
+      setConfirmDel(null);
+    });
+    if (ok) setConfirmDel(habit);
+  }, [openNavHandle]);
+
+  const closeNumEntry = useCallback(() => {
+    closeNavHandle(numEntryNavRef);
+    setNumEntry(null);
+  }, []);
+
+  const openNumEntry = useCallback(async (habit, date) => {
+    const ok = await openNavHandle(numEntryNavRef, 'habits-number-entry', () => {
+      numEntryNavRef.current = null;
+      setNumEntry(null);
+    });
+    if (ok) setNumEntry({ habit, date });
+  }, [openNavHandle]);
 
   const maybeReady = useCallback(() => {
     if (!readyFired.current && habitsLoaded.current && historyLoaded.current) {
@@ -214,12 +291,12 @@ export default function Habits({ appId, token }) {
           has_reminder: !!habit.reminder,
         });
       }
-      setForm(null);
+      closeForm();
     } catch (err) {
       reportError(err, 'saveHabit');
       throw err;
     }
-  }, []);
+  }, [closeForm]);
 
   const deleteHabit = useCallback(async (id) => {
     try {
@@ -234,6 +311,9 @@ export default function Habits({ appId, token }) {
         }
         return copy;
       });
+      closeNavHandle(confirmNavRef);
+      closeNavHandle(formNavRef);
+      closeNavHandle(detailNavRef);
       setConfirmDel(null); setForm(null); setDetailId(null);
     } catch (err) {
       reportError(err, 'deleteHabit');
@@ -251,10 +331,10 @@ export default function Habits({ appId, token }) {
       {detailHabit ? (
         <Detail
           habit={detailHabit} allLogs={allLogs} todayLog={todayLog} today={today}
-          onBack={() => setDetailId(null)}
-          onEdit={() => setForm({ mode: 'edit', habit: detailHabit })}
+          onBack={closeDetail}
+          onEdit={() => openForm({ mode: 'edit', habit: detailHabit })}
           onSetValue={(date, value) => setValue(detailHabit, date, value)}
-          onEditNumber={(date) => setNumEntry({ habit: detailHabit, date })}
+          onEditNumber={(date) => openNumEntry(detailHabit, date)}
         />
       ) : (
         <>
@@ -263,7 +343,7 @@ export default function Habits({ appId, token }) {
               <AppMark appId={appId} />
               <h1 className="hb-title">Habits</h1>
             </div>
-            <button className="hb-add" onClick={() => setForm({ mode: 'new' })}>+ New</button>
+            <button className="hb-add" onClick={() => openForm({ mode: 'new' })}>+ New</button>
           </header>
 
           <div className="hb-tabs" role="tablist">
@@ -277,14 +357,14 @@ export default function Habits({ appId, token }) {
                 habits={habits} todayLog={todayLog} allLogs={allLogs} today={today}
                 onSetValue={(h, v) => setValue(h, today, v)}
                 onAdjust={(h, deltaRaw) => adjustValue(h, today, deltaRaw)}
-                onOpenDetail={(h) => setDetailId(h.id)}
+                onOpenDetail={openDetail}
               />
             ) : (
               <AllHabits
                 habits={habits} allLogs={allLogs} todayLog={todayLog} today={today}
-                onOpenDetail={(h) => setDetailId(h.id)}
+                onOpenDetail={openDetail}
                 onSetValue={(h, d, v) => setValue(h, d, v)}
-                onEditNumber={(h, d) => setNumEntry({ habit: h, date: d })}
+                onEditNumber={openNumEntry}
               />
             )}
             {!online && <div className="hb-offline" aria-live="polite">Offline</div>}
@@ -296,8 +376,8 @@ export default function Habits({ appId, token }) {
         <HabitForm
           initial={form.mode === 'edit' ? form.habit : null}
           onSave={saveHabit}
-          onClose={() => setForm(null)}
-          onDelete={form.mode === 'edit' ? () => setConfirmDel(form.habit) : undefined}
+          onClose={closeForm}
+          onDelete={form.mode === 'edit' ? () => openConfirm(form.habit) : undefined}
         />
       )}
 
@@ -306,7 +386,7 @@ export default function Habits({ appId, token }) {
           title={`Delete “${confirmDel.name}”?`}
           body="This removes the habit and all of its history."
           onConfirm={() => deleteHabit(confirmDel.id)}
-          onCancel={() => setConfirmDel(null)}
+          onCancel={closeConfirm}
         />
       )}
 
@@ -314,9 +394,9 @@ export default function Habits({ appId, token }) {
         <NumberEntrySheet
           habit={numEntry.habit} date={numEntry.date}
           current={((numEntry.date === today ? { ...allLogs[numEntry.date], ...todayLog } : allLogs[numEntry.date]) || {})[numEntry.habit.id]}
-          onSave={(raw) => { setValue(numEntry.habit, numEntry.date, raw); setNumEntry(null); }}
-          onClear={() => { setValue(numEntry.habit, numEntry.date, null); setNumEntry(null); }}
-          onClose={() => setNumEntry(null)}
+          onSave={(raw) => { setValue(numEntry.habit, numEntry.date, raw); closeNumEntry(); }}
+          onClear={() => { setValue(numEntry.habit, numEntry.date, null); closeNumEntry(); }}
+          onClose={closeNumEntry}
         />
       )}
     </div>
