@@ -127,6 +127,21 @@ export function Toast({ text }) {
   return <div className="hb-toast" role="status">{text}</div>;
 }
 
+// Persistent banner for a FAILED write — a check-in / save / delete that didn't
+// land. Sits above the sheet layer so a failure inside an open sheet is still
+// visible, and offers a Retry so the write isn't silently lost. `role="alert"`
+// so it's announced; stays until the user retries (success clears it) or
+// dismisses it.
+export function ErrorBanner({ message, onRetry, onDismiss }) {
+  return (
+    <div className="hb-errbar" role="alert">
+      <span className="hb-errbar-msg">{message}</span>
+      <button className="hb-errbar-retry" onClick={onRetry}>Retry</button>
+      <button className="hb-errbar-x" onClick={onDismiss} aria-label="Dismiss">✕</button>
+    </div>
+  );
+}
+
 // Numeric entry sheet — record/backfill a measurable habit's value for a day.
 // Allows an explicit 0 (e.g. "0 sodas today"), which is a real, success-earning
 // value for AT_MOST habits and distinct from an unlogged day.

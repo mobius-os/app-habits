@@ -13,7 +13,7 @@ import { Today } from './ui/Today.jsx';
 import { AllHabits } from './ui/AllHabits.jsx';
 import { Detail } from './ui/Detail.jsx';
 import { HabitForm } from './ui/HabitForm.jsx';
-import { ConfirmSheet, NumberEntrySheet, AppMark } from './ui/Chrome.jsx';
+import { ConfirmSheet, NumberEntrySheet, AppMark, ErrorBanner } from './ui/Chrome.jsx';
 import { currentStreak } from './domain.js';
 
 function signal(name, payload) {
@@ -86,6 +86,7 @@ export default function Habits({ appId, token }) {
   const [confirmDel, setConfirmDel] = useState(null);
   const [numEntry, setNumEntry] = useState(null);   // { habit, date } | null  (measurable backfill)
   const [online, setOnline] = useState(true);
+  const [writeError, setWriteError] = useState(null);  // { message, retry } | null
   const habitsRef = useRef([]);
   const readyFired = useRef(false);
   const habitsLoaded = useRef(false);
@@ -223,13 +224,31 @@ export default function Habits({ appId, token }) {
     return () => { window.removeEventListener('online', f); window.removeEventListener('offline', f); };
   }, []);
 
+  // Every user-initiated write funnels through here. On failure it surfaces a
+  // visible, retryable error banner and RESOLVES with `undefined` instead of
+  // rethrowing — a rejected write used to escape as an unhandled rejection that
+  // left the sheet open with no message and silently dropped the check-in.
+  // Keeps the semantic signal('error') emission; callers treat an `undefined`
+  // result as "did not land" and skip their success-only side effects.
+  const attemptWrite = useCallback(async (source, message, op) => {
+    try {
+      const result = await op();
+      setWriteError(null);
+      return result;
+    } catch (err) {
+      reportError(err, source);
+      setWriteError({ message, retry: () => attemptWrite(source, message, op) });
+      return undefined;
+    }
+  }, []);
+
   // Write a value, then update local history from the SERIALIZED result rather
   // than re-fetching — this avoids the out-of-order refresh race (a refetch
   // started before an earlier write can land after it and revert state).
-  const setValue = useCallback(async (habit, date, value) => {
-    const baseLogs = { ...allLogs, ...(date === today ? { [today]: { ...(allLogs[today] || {}), ...todayLog } } : {}) };
-    const prevStreak = currentStreak(habit, store.entriesForHabit(baseLogs, habit.id), today);
-    try {
+  const setValue = useCallback((habit, date, value) => attemptWrite(
+    'setValue', 'Couldn’t save your check-in.', async () => {
+      const baseLogs = { ...allLogs, ...(date === today ? { [today]: { ...(allLogs[today] || {}), ...todayLog } } : {}) };
+      const prevStreak = currentStreak(habit, store.entriesForHabit(baseLogs, habit.id), today);
       const updated = await store.setEntry(date, habit.id, value);
       const nextLogs = { ...baseLogs, [date]: updated };
       const nextStreak = currentStreak(habit, store.entriesForHabit(nextLogs, habit.id), today);
@@ -241,21 +260,19 @@ export default function Habits({ appId, token }) {
       if (backfillDays > 0) signal('backfill_used', { days_ago: backfillDays });
       setAllLogs((prev) => ({ ...prev, [date]: updated }));
       if (date === today) setTodayLog(updated);
-    } catch (err) {
-      reportError(err, 'setValue');
-      throw err;
-    }
-  }, [allLogs, todayLog, today]);
+      return true;
+    },
+  ), [allLogs, todayLog, today, attemptWrite]);
 
   // Relative measured-amount adjust (the Today +/- stepper). Goes through the
   // store's serialized read-modify-write so rapid taps accumulate; returns the
   // updated day log so the caller can read the landed value.
-  const adjustValue = useCallback(async (habit, date, deltaRaw) => {
-    const baseLogs = { ...allLogs, ...(date === today ? { [today]: { ...(allLogs[today] || {}), ...todayLog } } : {}) };
-    const prevLog = baseLogs[date] || {};
-    const prevValue = prevLog[habit.id];
-    const prevStreak = currentStreak(habit, store.entriesForHabit(baseLogs, habit.id), today);
-    try {
+  const adjustValue = useCallback((habit, date, deltaRaw) => attemptWrite(
+    'adjustValue', 'Couldn’t save your check-in.', async () => {
+      const baseLogs = { ...allLogs, ...(date === today ? { [today]: { ...(allLogs[today] || {}), ...todayLog } } : {}) };
+      const prevLog = baseLogs[date] || {};
+      const prevValue = prevLog[habit.id];
+      const prevStreak = currentStreak(habit, store.entriesForHabit(baseLogs, habit.id), today);
       const updated = await store.adjustEntry(date, habit.id, deltaRaw);
       const nextValue = updated ? updated[habit.id] : undefined;
       if (nextValue !== prevValue) {
@@ -271,17 +288,14 @@ export default function Habits({ appId, token }) {
       setAllLogs((prev) => ({ ...prev, [date]: updated }));
       if (date === today) setTodayLog(updated);
       return updated;
-    } catch (err) {
-      reportError(err, 'adjustValue');
-      throw err;
-    }
-  }, [allLogs, todayLog, today]);
+    },
+  ), [allLogs, todayLog, today, attemptWrite]);
 
-  const saveHabit = useCallback(async (habit) => {
-    const list = habitsRef.current;
-    const exists = list.some((h) => h.id === habit.id);
-    const next = exists ? list.map((h) => (h.id === habit.id ? habit : h)) : [...list, habit];
-    try {
+  const saveHabit = useCallback((habit) => attemptWrite(
+    'saveHabit', 'Couldn’t save your habit.', async () => {
+      const list = habitsRef.current;
+      const exists = list.some((h) => h.id === habit.id);
+      const next = exists ? list.map((h) => (h.id === habit.id ? habit : h)) : [...list, habit];
       await store.saveHabits(next);
       if (!exists) {
         signal('item_created', {
@@ -292,14 +306,11 @@ export default function Habits({ appId, token }) {
         });
       }
       closeForm();
-    } catch (err) {
-      reportError(err, 'saveHabit');
-      throw err;
-    }
-  }, [closeForm]);
+    },
+  ), [closeForm, attemptWrite]);
 
-  const deleteHabit = useCallback(async (id) => {
-    try {
+  const deleteHabit = useCallback((id) => attemptWrite(
+    'deleteHabit', 'Couldn’t delete your habit.', async () => {
       await store.saveHabits(habitsRef.current.filter((h) => h.id !== id));
       await store.purgeHabit(id);   // scrub the habit's id from every day-log
       signal('item_deleted', { type: 'habit' });
@@ -315,11 +326,8 @@ export default function Habits({ appId, token }) {
       closeNavHandle(formNavRef);
       closeNavHandle(detailNavRef);
       setConfirmDel(null); setForm(null); setDetailId(null);
-    } catch (err) {
-      reportError(err, 'deleteHabit');
-      throw err;
-    }
-  }, []);
+    },
+  ), [attemptWrite]);
 
   const detailHabit = habits.find((h) => h.id === detailId);
 
@@ -394,9 +402,17 @@ export default function Habits({ appId, token }) {
         <NumberEntrySheet
           habit={numEntry.habit} date={numEntry.date}
           current={((numEntry.date === today ? { ...allLogs[numEntry.date], ...todayLog } : allLogs[numEntry.date]) || {})[numEntry.habit.id]}
-          onSave={(raw) => { setValue(numEntry.habit, numEntry.date, raw); closeNumEntry(); }}
-          onClear={() => { setValue(numEntry.habit, numEntry.date, null); closeNumEntry(); }}
+          onSave={(raw) => { setValue(numEntry.habit, numEntry.date, raw).then((ok) => { if (ok) closeNumEntry(); }); }}
+          onClear={() => { setValue(numEntry.habit, numEntry.date, null).then((ok) => { if (ok) closeNumEntry(); }); }}
           onClose={closeNumEntry}
+        />
+      )}
+
+      {writeError && (
+        <ErrorBanner
+          message={writeError.message}
+          onRetry={writeError.retry}
+          onDismiss={() => setWriteError(null)}
         />
       )}
     </div>
