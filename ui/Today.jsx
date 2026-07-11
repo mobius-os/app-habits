@@ -72,9 +72,14 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
       await onSetValue(h, null); // clear -> UNKNOWN (a quick un-check; explicit NO/SKIP live in the grid)
     } else {
       const projected = currentStreak(h, { ...s.entries, [today]: VALUE.YES_MANUAL }, today);
-      await onSetValue(h, VALUE.YES_MANUAL);
-      signalDayComplete(s.done);
-      celebrate(h, projected);
+      // Only celebrate once the write actually lands — onSetValue resolves falsy
+      // on a failed save (which surfaces its own retry banner), so a failed
+      // check-in no longer fires confetti as if it succeeded.
+      const ok = await onSetValue(h, VALUE.YES_MANUAL);
+      if (ok) {
+        signalDayComplete(s.done);
+        celebrate(h, projected);
+      }
     }
   }
 

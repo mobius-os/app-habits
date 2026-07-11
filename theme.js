@@ -238,8 +238,23 @@ export const CSS = `
   font-weight: 700; color: var(--muted); background: var(--surface); border: 1px solid var(--border);
   padding: 5px 12px; border-radius: 999px; }
 
+/* failed-write banner — persistent, sits ABOVE the sheet (z 120 > scrim 100) so a
+   save that fails inside a sheet is still visible; carries a Retry. */
+.hb-errbar { position: absolute; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom));
+  transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 8px;
+  max-width: calc(100% - 24px); background: var(--danger); color: var(--accent-fg);
+  padding: 8px 8px 8px 15px; border-radius: 12px; box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+  animation: hb-toastin .24s ease; }
+.hb-errbar-msg { font-size: 13.5px; font-weight: 750; }
+.hb-errbar-retry { flex: 0 0 auto; min-height: 44px; padding: 0 15px; border: none; border-radius: 9px;
+  background: rgba(255,255,255,0.24); color: var(--accent-fg); font-family: var(--font);
+  font-size: 14px; font-weight: 800; cursor: pointer; transition: transform .1s ease, filter .12s ease; }
+.hb-errbar-retry:active { transform: scale(0.95); filter: brightness(1.08); }
+.hb-errbar-x { flex: 0 0 auto; min-width: 44px; height: 44px; border: none; border-radius: 9px;
+  background: transparent; color: var(--accent-fg); font-size: 15px; cursor: pointer; opacity: 0.9; }
+
 @media (prefers-reduced-motion: reduce) {
   .hb-check, .hb-add, .hb-btn, .hb-hero-fill, .hb-ring-fill { transition: none; }
-  .hb-check.pop, .hb-confetti, .hb-sheet, .hb-scrim, .hb-toast { animation: none; }
+  .hb-check.pop, .hb-confetti, .hb-sheet, .hb-scrim, .hb-toast, .hb-errbar { animation: none; }
 }
 `;
