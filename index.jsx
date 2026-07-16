@@ -95,6 +95,20 @@ export default function Habits({ appId, token }) {
   const formNavRef = useRef(null);
   const confirmNavRef = useRef(null);
   const numEntryNavRef = useRef(null);
+  const tabRefs = useRef([]);
+
+  const onTabKeyDown = (event, index) => {
+    const order = ['today', 'all'];
+    let nextIndex = index;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % order.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + order.length) % order.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = order.length - 1;
+    else return;
+    event.preventDefault();
+    setTab(order[nextIndex]);
+    window.requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus());
+  };
 
   const openNavHandle = useCallback(async (ref, label, onBack) => {
     closeNavHandle(ref);
@@ -354,26 +368,30 @@ export default function Habits({ appId, token }) {
             <button className="hb-add" onClick={() => openForm({ mode: 'new' })}>+ New</button>
           </header>
 
-          <div className="hb-tabs" role="tablist">
-            <button className={`hb-tab${tab === 'today' ? ' is-active' : ''}`} onClick={() => setTab('today')} role="tab" aria-selected={tab === 'today'}>Today</button>
-            <button className={`hb-tab${tab === 'all' ? ' is-active' : ''}`} onClick={() => setTab('all')} role="tab" aria-selected={tab === 'all'}>All Habits</button>
+          <div className="hb-tabs" role="tablist" aria-label="Habit views">
+            <button id="hb-tab-today" ref={(node) => { tabRefs.current[0] = node }} className={`hb-tab${tab === 'today' ? ' is-active' : ''}`} onClick={() => setTab('today')} onKeyDown={(event) => onTabKeyDown(event, 0)} role="tab" aria-selected={tab === 'today'} aria-controls="hb-panel-today" tabIndex={tab === 'today' ? 0 : -1}>Today</button>
+            <button id="hb-tab-all" ref={(node) => { tabRefs.current[1] = node }} className={`hb-tab${tab === 'all' ? ' is-active' : ''}`} onClick={() => setTab('all')} onKeyDown={(event) => onTabKeyDown(event, 1)} role="tab" aria-selected={tab === 'all'} aria-controls="hb-panel-all" tabIndex={tab === 'all' ? 0 : -1}>All Habits</button>
           </div>
 
           <div className="hb-scroll">
             {tab === 'today' ? (
-              <Today
-                habits={habits} todayLog={todayLog} allLogs={allLogs} today={today}
-                onSetValue={(h, v) => setValue(h, today, v)}
-                onAdjust={(h, deltaRaw) => adjustValue(h, today, deltaRaw)}
-                onOpenDetail={openDetail}
-              />
+              <div id="hb-panel-today" role="tabpanel" aria-labelledby="hb-tab-today">
+                <Today
+                  habits={habits} todayLog={todayLog} allLogs={allLogs} today={today}
+                  onSetValue={(h, v) => setValue(h, today, v)}
+                  onAdjust={(h, deltaRaw) => adjustValue(h, today, deltaRaw)}
+                  onOpenDetail={openDetail}
+                />
+              </div>
             ) : (
-              <AllHabits
-                habits={habits} allLogs={allLogs} todayLog={todayLog} today={today}
-                onOpenDetail={openDetail}
-                onSetValue={(h, d, v) => setValue(h, d, v)}
-                onEditNumber={openNumEntry}
-              />
+              <div id="hb-panel-all" role="tabpanel" aria-labelledby="hb-tab-all">
+                <AllHabits
+                  habits={habits} allLogs={allLogs} todayLog={todayLog} today={today}
+                  onOpenDetail={openDetail}
+                  onSetValue={(h, d, v) => setValue(h, d, v)}
+                  onEditNumber={openNumEntry}
+                />
+              </div>
             )}
             {!online && <div className="hb-offline" aria-live="polite">Offline</div>}
           </div>

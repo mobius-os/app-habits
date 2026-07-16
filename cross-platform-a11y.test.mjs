@@ -18,3 +18,11 @@ test('top-pinned headers and scroll bottom include safe-area insets', () => {
   assert.match(css, /\.hb-detail-head[^}]*env\(safe-area-inset-top\)/, 'detail header needs top safe-area padding');
   assert.match(css, /\.hb-scroll[^}]*env\(safe-area-inset-bottom\)/, 'scroll content needs bottom safe-area padding');
 });
+
+test('view tabs use roving focus, arrow keys, and labelled tab panels', () => {
+  assert.match(index, /tabIndex=\{tab === 'today' \? 0 : -1\}/);
+  assert.match(index, /event\.key === 'ArrowRight'/);
+  assert.match(index, /event\.key === 'Home'/);
+  assert.match(index, /role="tabpanel" aria-labelledby="hb-tab-today"/);
+  assert.match(index, /role="tabpanel" aria-labelledby="hb-tab-all"/);
+});
