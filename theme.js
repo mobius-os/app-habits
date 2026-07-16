@@ -21,10 +21,10 @@ export const CSS = `
 .hb-mark-img { object-fit: contain; background: none; box-shadow: none; }
 .hb-title { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
 .hb-add { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px;
-  border: none; border-radius: 12px; background: var(--accent); color: var(--accent-fg);
+  border: none; border-radius: 12px; background: var(--accent-hover, var(--accent)); color: var(--accent-fg);
   font-family: var(--font); font-size: 15px; font-weight: 700; cursor: pointer;
   transition: transform .12s ease, filter .12s ease; }
-.hb-add:active { transform: scale(0.95); filter: brightness(1.05); }
+.hb-add:active { transform: scale(0.95); filter: brightness(0.94); }
 
 /* tabs */
 .hb-tabs { flex: 0 0 auto; display: flex; gap: 4px; margin: 2px 16px 8px; padding: 4px;
@@ -144,7 +144,7 @@ export const CSS = `
 .hb-seg { display: flex; gap: 4px; padding: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
 .hb-seg button { flex: 1; min-height: 44px; border: none; background: transparent; color: var(--muted);
   font-family: var(--font); font-size: 14px; font-weight: 700; border-radius: 9px; cursor: pointer; }
-.hb-seg button.is-active { background: var(--accent); color: var(--accent-fg); }
+.hb-seg button.is-active { background: var(--accent-hover, var(--accent)); color: var(--accent-fg); }
 
 /* emoji + palette pickers */
 .hb-emoji-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
@@ -159,7 +159,7 @@ export const CSS = `
 .hb-week { display: flex; gap: 6px; }
 .hb-week button { flex: 1; min-height: 44px; aspect-ratio: 1; border-radius: 999px; border: 1px solid var(--border);
   background: var(--bg); color: var(--muted); font-family: var(--font); font-size: 13px; font-weight: 800; cursor: pointer; }
-.hb-week button.is-on { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.hb-week button.is-on { background: var(--accent-hover, var(--accent)); border-color: var(--accent-hover, var(--accent)); color: var(--accent-fg); }
 
 /* buttons */
 .hb-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 48px;
@@ -167,7 +167,7 @@ export const CSS = `
   color: var(--text); font-family: var(--font); font-size: 15px; font-weight: 750; cursor: pointer;
   transition: transform .1s ease, filter .12s ease; }
 .hb-btn:active { transform: scale(0.97); }
-.hb-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.hb-btn-primary { background: var(--accent-hover, var(--accent)); border-color: var(--accent-hover, var(--accent)); color: var(--accent-fg); }
 .hb-btn-danger { background: var(--danger); border-color: var(--danger); color: var(--accent-fg); }
 .hb-btn:disabled { opacity: 0.5; }
 .hb-sheet-actions { display: flex; gap: 9px; margin-top: 4px; }
