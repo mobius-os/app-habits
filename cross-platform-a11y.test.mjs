@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const index = readFileSync(new URL('./index.jsx', import.meta.url), 'utf8');
 const css = readFileSync(new URL('./theme.js', import.meta.url), 'utf8');
+const chrome = readFileSync(new URL('./ui/Chrome.jsx', import.meta.url), 'utf8');
 
 test('nested views use the shell back sentinel and await readiness', () => {
   assert.match(index, /window\.mobius\.nav\.open/, 'nested views must register with the shell back protocol');
@@ -25,4 +26,12 @@ test('view tabs use roving focus, arrow keys, and labelled tab panels', () => {
   assert.match(index, /event\.key === 'Home'/);
   assert.match(index, /role="tabpanel" aria-labelledby="hb-tab-today"/);
   assert.match(index, /role="tabpanel" aria-labelledby="hb-tab-all"/);
+});
+
+test('custom sheets own the full modal focus contract', () => {
+  assert.match(chrome, /className="hb-sheet"[\s\S]*role="dialog"[\s\S]*aria-modal="true"/);
+  assert.match(chrome, /event\.key === 'Escape'/);
+  assert.match(chrome, /event\.key !== 'Tab'/);
+  assert.match(chrome, /document\.contains\(opener\)/);
+  assert.match(chrome, /aria-labelledby=\{title \? titleId : undefined\}/);
 });

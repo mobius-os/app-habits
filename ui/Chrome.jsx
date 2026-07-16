@@ -2,7 +2,9 @@
 // convention so a future library extraction is a grep-and-move. Color comes from
 // theme tokens; per-habit accent is passed as the `--hb-accent` CSS var.
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
+
+let sheetTitleSeq = 0;
 
 // The app's own installed icon, rounded and sized to the header. Falls back to
 // an emoji mark before the icon route exists (a fresh dev render, or a 404 on a
@@ -71,16 +73,66 @@ export function Ring({ value, size = 46, stroke = 5, accent, showLabel = true })
 /* mobius-ui:Sheet v1 — bottom sheet (the app's dialog; no native modals). */
 export function Sheet({ title, onClose, children }) {
   const vp = useVisualViewport();
+  const sheetRef = useRef(null);
+  const openerRef = useRef(typeof document !== 'undefined' ? document.activeElement : null);
+  const titleId = useMemo(() => `hb-sheet-title-${sheetTitleSeq++}`, []);
+
+  useEffect(() => {
+    const sheet = sheetRef.current;
+    if (sheet && !sheet.contains(document.activeElement)) {
+      sheet.querySelector(
+        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )?.focus();
+    }
+    return () => {
+      const opener = openerRef.current;
+      if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
+    };
+  }, []);
+
+  const onKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = sheetRef.current?.querySelectorAll(
+      'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (!focusable?.length) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
   // Pin the scrim (and so the bottom-anchored sheet) to the visible region
   // above the keyboard; otherwise fall back to the CSS `inset: 0`.
   const scrimStyle = vp
     ? { top: `${vp.top}px`, height: `${vp.height}px`, bottom: 'auto' }
     : undefined;
   return (
-    <div className="hb-scrim" style={scrimStyle} onClick={onClose} role="dialog" aria-modal="true">
-      <div className="hb-sheet" onClick={(e) => e.stopPropagation()}>
+    <div className="hb-scrim" style={scrimStyle} onClick={onClose} role="presentation">
+      <div
+        ref={sheetRef}
+        className="hb-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? titleId : undefined}
+        aria-label={title ? undefined : 'Dialog'}
+        onKeyDown={onKeyDown}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="hb-sheet-grip" aria-hidden="true" />
-        {title && <h3 className="hb-sheet-title">{title}</h3>}
+        {title && <h3 className="hb-sheet-title" id={titleId}>{title}</h3>}
         {children}
       </div>
     </div>
@@ -136,8 +188,8 @@ export function ErrorBanner({ message, onRetry, onDismiss }) {
   return (
     <div className="hb-errbar" role="alert">
       <span className="hb-errbar-msg">{message}</span>
-      <button className="hb-errbar-retry" onClick={onRetry}>Retry</button>
-      <button className="hb-errbar-x" onClick={onDismiss} aria-label="Dismiss">✕</button>
+      <button type="button" className="hb-errbar-retry" onClick={onRetry}>Retry</button>
+      <button type="button" className="hb-errbar-x" onClick={onDismiss} aria-label="Dismiss">✕</button>
     </div>
   );
 }
@@ -161,8 +213,9 @@ export function NumberEntrySheet({ habit, date, current, onSave, onClear, onClos
         aria-label={`Amount for ${habit.name}`}
       />
       <div className="hb-sheet-actions">
-        {logged && <button className="hb-btn hb-btn-danger" onClick={onClear}>Clear</button>}
+        {logged && <button type="button" className="hb-btn hb-btn-danger" onClick={onClear}>Clear</button>}
         <button
+          type="button"
           className="hb-btn hb-btn-primary"
           onClick={() => { if (canSave) onSave(Math.max(0, Math.round(parsed * 1000))); }}
           disabled={!canSave}
@@ -178,8 +231,8 @@ export function ConfirmSheet({ title, body, confirmLabel = 'Delete', onConfirm, 
     <Sheet title={title} onClose={onCancel}>
       {body && <p className="hb-section-sub" style={{ margin: 0 }}>{body}</p>}
       <div className="hb-sheet-actions">
-        <button className="hb-btn" onClick={onCancel}>Cancel</button>
-        <button className="hb-btn hb-btn-danger" onClick={onConfirm}>{confirmLabel}</button>
+        <button type="button" className="hb-btn" onClick={onCancel}>Cancel</button>
+        <button type="button" className="hb-btn hb-btn-danger" onClick={onConfirm}>{confirmLabel}</button>
       </div>
     </Sheet>
   );
