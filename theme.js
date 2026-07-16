@@ -51,7 +51,7 @@ export const CSS = `
   background: rgba(255,255,255,0.22); padding: 6px 11px; border-radius: 999px; backdrop-filter: blur(4px); }
 .hb-hero-sub { margin-top: 4px; font-size: 13px; font-weight: 600; opacity: 0.92; }
 .hb-hero-bar { margin-top: 13px; height: 8px; border-radius: 999px; background: rgba(255,255,255,0.25); overflow: hidden; }
-.hb-hero-fill { height: 100%; border-radius: 999px; background: var(--accent-fg); transition: width .5s cubic-bezier(.2,.8,.2,1); }
+.hb-hero-fill { height: 100%; width: 100%; border-radius: 999px; background: var(--accent-fg); transform-origin: left; transition: transform .35s ease-out; }
 
 /* habit card (Today) */
 .hb-card { display: flex; align-items: center; gap: 13px; padding: 13px 14px; border-radius: 12px;
@@ -62,7 +62,7 @@ export const CSS = `
 .hb-emoji { flex: 0 0 auto; width: 46px; height: 46px; border-radius: 12px; display: flex;
   align-items: center; justify-content: center; font-size: 24px;
   background: color-mix(in srgb, var(--hb-accent) 16%, transparent); }
-.hb-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hb-card-main { flex: 1; min-width: 0; min-height: 44px; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
 .hb-card-name { font-size: 16px; font-weight: 750; letter-spacing: -0.01em; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hb-card-sub { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 650; color: var(--muted); }
@@ -80,12 +80,12 @@ export const CSS = `
 .hb-check { flex: 0 0 auto; width: 52px; height: 52px; border-radius: 12px; border: 2px solid
   color-mix(in srgb, var(--hb-accent) 40%, var(--border)); background: transparent; cursor: pointer;
   display: flex; align-items: center; justify-content: center; color: var(--hb-accent);
-  font-size: 23px; font-weight: 800; transition: transform .14s cubic-bezier(.2,1.5,.4,1), background .14s ease; }
+  font-size: 23px; font-weight: 800; transition: transform .14s ease-out, background .14s ease; }
 .hb-check:active { transform: scale(0.88); }
 .hb-check.is-done { background: var(--hb-accent); border-color: var(--hb-accent); color: var(--accent-fg); }
 .hb-check.is-skip { border-style: dashed; color: var(--muted); border-color: var(--border); }
-.hb-check.pop { animation: hb-pop .42s cubic-bezier(.2,1.4,.4,1); }
-@keyframes hb-pop { 0%{transform:scale(.85)} 40%{transform:scale(1.18)} 100%{transform:scale(1)} }
+.hb-check.pop { animation: hb-pop .26s ease-out; }
+@keyframes hb-pop { 0%{transform:scale(.9)} 55%{transform:scale(1.06)} 100%{transform:scale(1)} }
 
 /* measurable quick-entry */
 .hb-meas { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 70px; }

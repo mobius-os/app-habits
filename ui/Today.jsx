@@ -120,7 +120,7 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
         <div className="hb-hero-sub">
           {doneCount === total ? 'All done today — beautiful work.' : `${total - doneCount} to go. Keep the streak alive.`}
         </div>
-        <div className="hb-hero-bar"><div className="hb-hero-fill" style={{ width: `${pct}%` }} /></div>
+        <div className="hb-hero-bar"><div className="hb-hero-fill" style={{ transform: `scaleX(${pct / 100})` }} /></div>
       </div>
 
       {stats.map((s) => {
