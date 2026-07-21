@@ -76,11 +76,11 @@ export const CSS = `
   transition: stroke-dashoffset .6s cubic-bezier(.2,.8,.2,1); }
 .hb-ring-label { font-size: 11px; font-weight: 800; fill: var(--text); }
 
-/* check tile */
-.hb-check { flex: 0 0 auto; width: 52px; height: 52px; border-radius: 12px; border: 2px solid
+/* check tile — same size/shape as the +/- step buttons (.hb-step) */
+.hb-check { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 10px; border: 1px solid
   color-mix(in srgb, var(--hb-accent) 40%, var(--border)); background: transparent; cursor: pointer;
   display: flex; align-items: center; justify-content: center; color: var(--hb-accent);
-  font-size: 23px; font-weight: 800; transition: transform .14s ease-out, background .14s ease; }
+  font-size: 18px; font-weight: 800; transition: transform .14s ease-out, background .14s ease; }
 .hb-check:active { transform: scale(0.88); }
 .hb-check.is-done { background: var(--hb-accent); border-color: var(--hb-accent); color: var(--accent-fg); }
 .hb-check.is-skip { border-style: dashed; color: var(--muted); border-color: var(--border); }
@@ -97,6 +97,21 @@ export const CSS = `
   background: var(--surface2, var(--surface)); color: var(--text); font-size: 17px; font-weight: 800;
   cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .hb-step:active { transform: scale(0.9); }
+
+/* timer habit — stopwatch + play/pause, paired with the check button */
+.hb-timer { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+.hb-timer-col { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; min-width: 46px; }
+.hb-timer-time { font-size: 16px; font-weight: 850; color: var(--hb-accent); line-height: 1;
+  font-variant-numeric: tabular-nums; }
+.hb-timer-time.is-zero { color: var(--muted); }
+.hb-timer-sub { font-size: 10.5px; font-weight: 650; color: var(--muted); }
+.hb-timer-reset { border: none; background: none; padding: 2px 0; font-size: 11px; font-weight: 650;
+  color: var(--muted); text-decoration: underline; cursor: pointer; min-height: 20px; }
+.hb-timer-play { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface2, var(--surface)); color: var(--hb-accent); font-size: 15px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.hb-timer-play.is-running { background: var(--hb-accent); border-color: var(--hb-accent); color: var(--accent-fg); }
+.hb-timer-play:active { transform: scale(0.9); }
 
 /* celebration burst */
 .hb-burst { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 60; }
@@ -139,6 +154,8 @@ export const CSS = `
 .hb-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
 .hb-row { display: flex; gap: 9px; }
 .hb-row > * { flex: 1; }
+.hb-hint { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.hb-input-static { display: flex; align-items: center; color: var(--muted); font-weight: 650; }
 
 /* segmented control */
 .hb-seg { display: flex; gap: 4px; padding: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }

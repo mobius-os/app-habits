@@ -9,6 +9,7 @@
 
 const HABITS = 'habits.json';
 const logPath = (dateStr) => `logs/${dateStr}.json`;
+const TIMERS = 'timers.json';
 
 // Local-calendar date string (the user's "today"); domain treats date strings as
 // opaque ordered labels, so local-vs-UTC only affects which day a tap lands on.
@@ -90,17 +91,52 @@ export function adjustEntry(dateStr, habitId, deltaRaw, floor = 0) {
 // Best-effort and serialized through the same per-path queue.
 export async function purgeHabit(habitId) {
   const all = await loadAllLogs();
-  if (all === null) return;
-  await Promise.all(
-    Object.entries(all).map(([dateStr, log]) => {
-      if (!Object.prototype.hasOwnProperty.call(log, habitId)) return null;
-      return enqueue(logPath(dateStr), async () => {
-        const cur = await getDayLog(dateStr);
-        delete cur[habitId];
-        await window.mobius.storage.set(logPath(dateStr), cur);
-      });
-    }),
-  );
+  if (all !== null) {
+    await Promise.all(
+      Object.entries(all).map(([dateStr, log]) => {
+        if (!Object.prototype.hasOwnProperty.call(log, habitId)) return null;
+        return enqueue(logPath(dateStr), async () => {
+          const cur = await getDayLog(dateStr);
+          delete cur[habitId];
+          await window.mobius.storage.set(logPath(dateStr), cur);
+        });
+      }),
+    );
+  }
+  await clearTimerState(habitId);
+}
+
+// --- in-app stopwatch (per timer-enabled habit, "today" only) ---
+//
+// timers.json -> { [habitId]: { date: 'YYYY-MM-DD', elapsedMs, runningSince } }
+// `runningSince` is a wall-clock timestamp (or null when paused), so a
+// timer keeps counting correctly across app close/reopen — the displayed
+// value is always `elapsedMs + (runningSince ? now - runningSince : 0)`,
+// never a value that has to be ticked while the component is unmounted.
+// `date` lets a stale timer from a previous day be ignored/reset rather than
+// silently crediting today with yesterday's leftover time.
+
+export function subscribeTimers(cb) {
+  return window.mobius.storage.subscribe(TIMERS, (v) => cb(v || {}));
+}
+
+export function setTimerState(habitId, patch) {
+  return enqueue(TIMERS, async () => {
+    const all = (await window.mobius.storage.get(TIMERS)) || {};
+    const next = { ...all, [habitId]: { ...(all[habitId] || {}), ...patch } };
+    await window.mobius.storage.set(TIMERS, next);
+    return next;
+  });
+}
+
+export function clearTimerState(habitId) {
+  return enqueue(TIMERS, async () => {
+    const all = (await window.mobius.storage.get(TIMERS)) || {};
+    if (!(habitId in all)) return all;
+    const { [habitId]: _drop, ...rest } = all;
+    await window.mobius.storage.set(TIMERS, rest);
+    return rest;
+  });
 }
 
 // --- history (analytics screens) ---

@@ -33,6 +33,7 @@ export function HabitForm({ initial, onSave, onClose, onDelete }) {
   const [targetValue, setTargetValue] = useState(String(initial?.targetValue ?? 1));
   const [targetType, setTargetType] = useState(initial?.targetType || 'AT_LEAST');
   const [unit, setUnit] = useState(initial?.unit || '');
+  const [useTimer, setUseTimer] = useState(!!initial?.useTimer);
   const [freqIdx, setFreqIdx] = useState(() => {
     const i = freqOptions.findIndex((p) => p.freqNum === initial?.freqNum && p.freqDen === initial?.freqDen);
     return i >= 0 ? i : 0;
@@ -68,8 +69,11 @@ export function HabitForm({ initial, onSave, onClose, onDelete }) {
       color,
       type,
       targetValue: type === 'NUMERICAL' ? (Number.isFinite(parsedTarget) ? parsedTarget : 1) : undefined,
-      targetType: type === 'NUMERICAL' ? targetType : undefined,
-      unit: type === 'NUMERICAL' ? unit.trim() : undefined,
+      // A timer always counts UP toward a minimum, in minutes — it can't express
+      // an "at most" cap, so force both when the timer is on.
+      targetType: type === 'NUMERICAL' ? (useTimer ? 'AT_LEAST' : targetType) : undefined,
+      unit: type === 'NUMERICAL' ? (useTimer ? 'min' : unit.trim()) : undefined,
+      useTimer: type === 'NUMERICAL' ? useTimer : false,
       freqNum: preset.freqNum,
       freqDen: preset.freqDen,
       reminder: remindOn ? { hour: h || 0, minute: m || 0, days: remindDays, tz } : null,
@@ -98,20 +102,41 @@ export function HabitForm({ initial, onSave, onClose, onDelete }) {
 
       {type === 'NUMERICAL' && (
         <div className="hb-field">
-          <label className="hb-label">Target</label>
-          <div className="hb-seg" role="group" aria-label="Target type">
-            <button className={targetType === 'AT_LEAST' ? 'is-active' : ''} onClick={() => setTargetType('AT_LEAST')}>At least</button>
-            <button className={targetType === 'AT_MOST' ? 'is-active' : ''} onClick={() => setTargetType('AT_MOST')}>At most</button>
-          </div>
+          <label className="hb-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>Use a timer</span>
+            <input
+              type="checkbox" checked={useTimer}
+              onChange={(e) => { setUseTimer(e.target.checked); if (e.target.checked) setTargetType('AT_LEAST'); }}
+              aria-label="Use an in-app timer for this habit"
+            />
+          </label>
+          <p className="hb-hint">
+            {useTimer
+              ? 'Start/pause a stopwatch on the Today card — it checks off on its own once you hit the target minutes (or tap the checkbox any time, e.g. after timing it externally).'
+              : 'A plain number you log or step up/down yourself.'}
+          </p>
+
+          {!useTimer && (
+            <div className="hb-seg" role="group" aria-label="Target type">
+              <button className={targetType === 'AT_LEAST' ? 'is-active' : ''} onClick={() => setTargetType('AT_LEAST')}>At least</button>
+              <button className={targetType === 'AT_MOST' ? 'is-active' : ''} onClick={() => setTargetType('AT_MOST')}>At most</button>
+            </div>
+          )}
           <div className="hb-row" style={{ marginTop: 8 }}>
             <input
               className="hb-input" type="number" inputMode="decimal" value={targetValue}
-              onChange={(e) => setTargetValue(e.target.value)} aria-label="Target value"
+              onChange={(e) => setTargetValue(e.target.value)}
+              aria-label={useTimer ? 'Target minutes' : 'Target value'}
+              placeholder={useTimer ? '15' : undefined}
             />
-            <input
-              className="hb-input" placeholder="unit (km, pages…)" value={unit}
-              onChange={(e) => setUnit(e.target.value)} aria-label="Unit"
-            />
+            {useTimer ? (
+              <span className="hb-input hb-input-static" aria-hidden="true">min</span>
+            ) : (
+              <input
+                className="hb-input" placeholder="unit (km, pages…)" value={unit}
+                onChange={(e) => setUnit(e.target.value)} aria-label="Unit"
+              />
+            )}
           </div>
         </div>
       )}
