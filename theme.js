@@ -53,8 +53,12 @@ export const CSS = `
 .hb-hero-bar { margin-top: 13px; height: 8px; border-radius: 999px; background: rgba(255,255,255,0.25); overflow: hidden; }
 .hb-hero-fill { height: 100%; width: 100%; border-radius: 999px; background: var(--accent-fg); transform-origin: left; transition: transform .35s ease-out; }
 
-/* habit card (Today) */
-.hb-card { display: flex; align-items: center; gap: 13px; padding: 13px 14px; border-radius: 12px;
+/* habit card (Today). flex-wrap so a card that doesn't fit on one line at any
+   viewport width (a timer habit's ring + stopwatch + check is the widest
+   combination) wraps onto a second line instead of overflowing the card —
+   see .hb-card-controls just below for the piece that actually wraps. */
+.hb-card { display: flex; flex-wrap: wrap; align-items: center; gap: 13px; row-gap: 8px;
+  padding: 13px 14px; border-radius: 12px;
   background: var(--surface); border: 1px solid var(--border);
   transition: transform .12s ease, box-shadow .2s ease; }
 .hb-card.is-done { box-shadow: 0 4px 18px color-mix(in srgb, var(--hb-accent) 22%, transparent);
@@ -68,6 +72,13 @@ export const CSS = `
 .hb-card-sub { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 650; color: var(--muted); }
 .hb-streakchip { display: inline-flex; align-items: center; gap: 3px;
   color: color-mix(in srgb, var(--hb-accent) 78%, var(--text)); font-weight: 800; }
+
+/* The ring + timer/measure/check cluster is one atomic flex item so it wraps
+   to its own full-width row as a unit on narrow phones (see .hb-card above),
+   rather than the habit name losing the tug-of-war for space against these
+   fixed-width controls and getting squeezed to 0 while the controls overflow
+   the card. Wrapped or not, it stays right-aligned. */
+.hb-card-controls { display: flex; align-items: center; gap: 13px; flex: 0 0 auto; margin-left: auto; }
 
 /* strength ring */
 .hb-ring { flex: 0 0 auto; }

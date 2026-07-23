@@ -308,9 +308,20 @@ export default function Habits({ appId, token }) {
   const saveHabit = useCallback((habit) => attemptWrite(
     'saveHabit', 'Couldn’t save your habit.', async () => {
       const list = habitsRef.current;
-      const exists = list.some((h) => h.id === habit.id);
+      const prev = list.find((h) => h.id === habit.id);
+      const exists = !!prev;
       const next = exists ? list.map((h) => (h.id === habit.id ? habit : h)) : [...list, habit];
       await store.saveHabits(next);
+      // The timer was on and no longer is (toggled off, or the habit was
+      // switched away from NUMERICAL, which also forces useTimer false) —
+      // pause/clear its persisted stopwatch record. Otherwise a running or
+      // just-paused record survives underneath the disabled habit, and
+      // switching the timer back on later (same day) would silently resume
+      // counting from that stale `runningSince`/`elapsedMs`, crediting the
+      // entire hidden interval as if it had been running the whole time.
+      if (prev?.useTimer && !habit.useTimer) {
+        await store.clearTimerState(habit.id);
+      }
       if (!exists) {
         signal('item_created', {
           type: 'habit',
@@ -322,6 +333,17 @@ export default function Habits({ appId, token }) {
       closeForm();
     },
   ), [closeForm, attemptWrite]);
+
+  // In-app stopwatch writes (Today's timer). Same visible, retryable-error
+  // contract as every other user write — a failed start/pause/reset used to
+  // become an unhandled rejection with no recovery UI.
+  const writeTimerState = useCallback((habit, patch) => attemptWrite(
+    'timerState', 'Couldn’t save the timer.', () => store.setTimerState(habit.id, patch),
+  ), [attemptWrite]);
+
+  const clearTimerWrite = useCallback((habit) => attemptWrite(
+    'timerClear', 'Couldn’t reset the timer.', () => store.clearTimerState(habit.id),
+  ), [attemptWrite]);
 
   const deleteHabit = useCallback((id) => attemptWrite(
     'deleteHabit', 'Couldn’t delete your habit.', async () => {
@@ -381,6 +403,8 @@ export default function Habits({ appId, token }) {
                   onSetValue={(h, v) => setValue(h, today, v)}
                   onAdjust={(h, deltaRaw) => adjustValue(h, today, deltaRaw)}
                   onOpenDetail={openDetail}
+                  onTimerWrite={writeTimerState}
+                  onTimerClear={clearTimerWrite}
                 />
               </div>
             ) : (

@@ -106,7 +106,13 @@ export function HabitForm({ initial, onSave, onClose, onDelete }) {
             <span>Use a timer</span>
             <input
               type="checkbox" checked={useTimer}
-              onChange={(e) => { setUseTimer(e.target.checked); if (e.target.checked) setTargetType('AT_LEAST'); }}
+              // Only flip the `useTimer` flag here — `targetType` is coerced to
+              // 'AT_LEAST' at save time below (a timer always counts up toward
+              // a minimum), NOT mutated in this handler. Mutating it here used
+              // to mean merely checking the box then unchecking it again (never
+              // saving) permanently forgot the habit's original AT_MOST choice,
+              // since the underlying state had already been overwritten.
+              onChange={(e) => setUseTimer(e.target.checked)}
               aria-label="Use an in-app timer for this habit"
             />
           </label>

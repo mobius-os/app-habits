@@ -325,3 +325,25 @@ export function bestStreaks(habit, entriesByDate, n) {
   streaks.sort((a, b) => b.length - a.length || (a.end < b.end ? 1 : -1));
   return streaks.slice(0, n);
 }
+
+// --- in-app timer (Today's stopwatch, per timer-enabled habit) ---
+
+// Live elapsed ms for a persisted timer record (storage.js's
+// `{ date, elapsedMs, runningSince }`) as of `nowMs`, given "today"'s date
+// string. A record from any day other than today — including a leftover
+// record from before a day rollover — reads as zero, so a stopwatch always
+// starts fresh at 0 on a new day instead of silently crediting today with
+// yesterday's (possibly still-"running") time. No record at all is also 0.
+export function timerLiveElapsedMs(rec, todayStr, nowMs) {
+  if (!rec || rec.date !== todayStr) return 0;
+  const base = rec.elapsedMs || 0;
+  return rec.runningSince ? base + (nowMs - rec.runningSince) : base;
+}
+
+// Whether a timer habit's elapsed time has reached its target (targetValue is
+// in minutes; elapsedMs is milliseconds). A target of 0 (or unset) can never
+// auto-complete from the timer alone — the habit still checks off manually.
+export function timerTargetReachedMs(habit, elapsedMs) {
+  const targetMs = (habit.targetValue || 0) * 60000;
+  return targetMs > 0 && elapsedMs >= targetMs;
+}

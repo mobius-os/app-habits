@@ -4,9 +4,9 @@
 
 import { useMemo, useState, useRef, useEffect } from 'react';
 import { Ring, Confetti, Toast, EmptyState } from './Chrome.jsx';
-import { entriesForHabit, subscribeTimers, setTimerState, clearTimerState } from '../storage.js';
+import { entriesForHabit, subscribeTimers } from '../storage.js';
 import { accent, freqLabel } from '../constants.js';
-import { VALUE, isSuccess, strength, currentStreak } from '../domain.js';
+import { VALUE, isSuccess, strength, currentStreak, timerLiveElapsedMs, timerTargetReachedMs } from '../domain.js';
 
 function streakMessage(streak) {
   if (streak >= 100) return `💯 ${streak}-day streak!`;
@@ -27,16 +27,9 @@ function formatClock(ms) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-// Live elapsed ms for one habit's timer as of `now`, given its persisted record
-// (or none). A record from a previous day (or none at all) reads as zero —
-// yesterday's leftover time never silently credits today.
-function liveElapsed(rec, today, now) {
-  if (!rec || rec.date !== today) return 0;
-  const base = rec.elapsedMs || 0;
-  return rec.runningSince ? base + (now - rec.runningSince) : base;
-}
-
-export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, onOpenDetail }) {
+export function Today({
+  habits, todayLog, allLogs, today, onSetValue, onAdjust, onOpenDetail, onTimerWrite, onTimerClear,
+}) {
   const [burst, setBurst] = useState(null);     // {id, colors} | null
   const [toast, setToast] = useState(null);
   const [poppedId, setPoppedId] = useState(null); // habit id mid check-pop (transient)
@@ -49,11 +42,31 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
   const timerRecsRef = useRef(timerRecs);
   useEffect(() => { timerRecsRef.current = timerRecs; }, [timerRecs]);
   useEffect(() => subscribeTimers(setTimerRecs), []);
-  // Tick once a second, but only while at least one timer for TODAY is running
-  // — an idle app with no running stopwatch shouldn't burn a per-second render.
+
+  const active = useMemo(
+    () => habits.filter((h) => !h.archived).sort((a, b) => (a.position || 0) - (b.position || 0)),
+    [habits],
+  );
+
+  // Habits currently offering the in-app timer, right now — NOT just "has a
+  // timer record". A record survives a habit being switched off (or deleted
+  // and re-created with the same id can't happen, but disable-then-re-enable
+  // same day can) purely so it can be actively cleared elsewhere; a record
+  // whose habit no longer has the timer enabled must never drive the ticking
+  // interval or be trusted as "still running".
+  const timerEnabledIds = useMemo(
+    () => new Set(active.filter((h) => h.useTimer).map((h) => h.id)),
+    [active],
+  );
+
+  // Tick once a second, but only while at least one CURRENTLY timer-enabled
+  // habit has a timer running for TODAY — an idle app, or a habit whose timer
+  // was since turned off, shouldn't burn a per-second render.
   const anyRunning = useMemo(
-    () => Object.values(timerRecs).some((r) => r.date === today && r.runningSince != null),
-    [timerRecs, today],
+    () => Object.entries(timerRecs).some(
+      ([habitId, r]) => timerEnabledIds.has(habitId) && r.date === today && r.runningSince != null,
+    ),
+    [timerRecs, today, timerEnabledIds],
   );
   useEffect(() => {
     if (!anyRunning) return;
@@ -61,10 +74,6 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
     return () => clearInterval(id);
   }, [anyRunning]);
 
-  const active = useMemo(
-    () => habits.filter((h) => !h.archived).sort((a, b) => (a.position || 0) - (b.position || 0)),
-    [habits],
-  );
   const merged = useMemo(() => ({ ...allLogs, [today]: todayLog }), [allLogs, today, todayLog]);
 
   const stats = useMemo(() => active.map((h) => {
@@ -74,7 +83,7 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
       ? isSuccess(h, value === undefined ? VALUE.UNKNOWN : value)
       : (value === VALUE.YES_MANUAL || value === VALUE.YES_AUTO);
     const timerRec = h.useTimer ? timerRecs[h.id] : undefined;
-    const timerElapsedMs = h.useTimer ? liveElapsed(timerRec, today, nowMs) : 0;
+    const timerElapsedMs = h.useTimer ? timerLiveElapsedMs(timerRec, today, nowMs) : 0;
     const timerRunning = !!(timerRec && timerRec.date === today && timerRec.runningSince != null);
     return {
       habit: h, value, done,
@@ -139,10 +148,13 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
 
   // Start/pause the in-app stopwatch. `runningSince` is a wall-clock timestamp,
   // so the elapsed time stays correct even if the app is closed and reopened
-  // mid-timer — see storage.js.
+  // mid-timer — see storage.js. Routed through the parent's attemptWrite (same
+  // visible, retryable-error contract as every other user write): a failed
+  // start/pause used to vanish as an unhandled rejection with the button just
+  // silently not responding.
   async function toggleTimer(s) {
     const h = s.habit;
-    await setTimerState(h.id, {
+    await onTimerWrite(h, {
       date: today,
       elapsedMs: s.timerElapsedMs,
       runningSince: s.timerRunning ? null : Date.now(),
@@ -150,7 +162,7 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
   }
 
   async function resetTimer(s) {
-    await clearTimerState(s.habit.id);
+    await onTimerClear(s.habit);
   }
 
   // Reached the target while running: pause, persist the committed elapsed
@@ -158,7 +170,11 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
   async function completeFromTimer(s) {
     const h = s.habit;
     const wasDone = s.done;
-    await setTimerState(h.id, { date: today, elapsedMs: s.timerElapsedMs, runningSince: null });
+    const paused = await onTimerWrite(h, { date: today, elapsedMs: s.timerElapsedMs, runningSince: null });
+    // The pause write failed (attemptWrite already surfaced the retry banner):
+    // bail out rather than log a check-in against a timer that's still
+    // "running" as far as storage is concerned.
+    if (paused === undefined) return;
     const raw = Math.round((s.timerElapsedMs / 60000) * 1000);
     const projected = currentStreak(h, { ...s.entries, [today]: raw }, today);
     const ok = await onSetValue(h, raw);
@@ -174,7 +190,8 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
     if (s.done) { await onSetValue(h, null); return; }
     const wasDone = s.done;
     if (s.timerRunning) {
-      await setTimerState(h.id, { date: today, elapsedMs: s.timerElapsedMs, runningSince: null });
+      const paused = await onTimerWrite(h, { date: today, elapsedMs: s.timerElapsedMs, runningSince: null });
+      if (paused === undefined) return; // pause failed; leave the timer running rather than log a check-in on top of it
     }
     const minutes = Math.max(s.timerElapsedMs / 60000, h.targetValue || 0);
     const raw = Math.round(minutes * 1000);
@@ -192,8 +209,7 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
     stats.forEach((s) => {
       const h = s.habit;
       if (!h.useTimer || !s.timerRunning || s.done) return;
-      const targetMs = (h.targetValue || 0) * 60000;
-      if (targetMs <= 0 || s.timerElapsedMs < targetMs) return;
+      if (!timerTargetReachedMs(h, s.timerElapsedMs)) return;
       if (completingRef.current.has(h.id)) return;
       completingRef.current.add(h.id);
       completeFromTimer(s).finally(() => completingRef.current.delete(h.id));
@@ -247,53 +263,58 @@ export function Today({ habits, todayLog, allLogs, today, onSetValue, onAdjust, 
                 <span>{freqLabel(h)}</span>
               </div>
             </div>
-            <Ring value={s.strength} accent={acc} />
-            {h.useTimer ? (
-              <>
-                <div className="hb-timer">
-                  <div className="hb-timer-col">
-                    <span className={`hb-timer-time${s.timerElapsedMs > 0 ? '' : ' is-zero'}`}>
-                      {formatClock(s.timerElapsedMs)}
-                    </span>
-                    <span className="hb-timer-sub">
-                      {h.targetValue ? `/ ${h.targetValue} min` : ''}
-                    </span>
-                    {!s.timerRunning && s.timerElapsedMs > 0 && !s.done && (
-                      <button className="hb-timer-reset" onClick={() => resetTimer(s)} aria-label={`Reset ${h.name} timer`}>
-                        Reset
-                      </button>
-                    )}
+            {/* Grouped so the whole controls cluster wraps to its own row as one
+                unit on narrow phones, instead of the name being squeezed to
+                nothing while these stay put — see .hb-card-controls. */}
+            <div className="hb-card-controls">
+              <Ring value={s.strength} accent={acc} />
+              {h.useTimer ? (
+                <>
+                  <div className="hb-timer">
+                    <div className="hb-timer-col">
+                      <span className={`hb-timer-time${s.timerElapsedMs > 0 ? '' : ' is-zero'}`}>
+                        {formatClock(s.timerElapsedMs)}
+                      </span>
+                      <span className="hb-timer-sub">
+                        {h.targetValue ? `/ ${h.targetValue} min` : ''}
+                      </span>
+                      {!s.timerRunning && s.timerElapsedMs > 0 && !s.done && (
+                        <button className="hb-timer-reset" onClick={() => resetTimer(s)} aria-label={`Reset ${h.name} timer`}>
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      className={`hb-timer-play${s.timerRunning ? ' is-running' : ''}`}
+                      onClick={() => toggleTimer(s)}
+                      aria-label={s.timerRunning ? `Pause ${h.name} timer` : `Start ${h.name} timer`}
+                    >{s.timerRunning ? '⏸' : '▶'}</button>
                   </div>
                   <button
-                    className={`hb-timer-play${s.timerRunning ? ' is-running' : ''}`}
-                    onClick={() => toggleTimer(s)}
-                    aria-label={s.timerRunning ? `Pause ${h.name} timer` : `Start ${h.name} timer`}
-                  >{s.timerRunning ? '⏸' : '▶'}</button>
+                    className={`hb-check${s.done ? ' is-done' : ''}${poppedId === h.id ? ' pop' : ''}`}
+                    onClick={() => toggleTimerDone(s)}
+                    aria-label={s.done ? `Mark ${h.name} not done` : `Mark ${h.name} done`} aria-pressed={s.done}
+                  >{s.done ? '✓' : ''}</button>
+                </>
+              ) : isNum ? (
+                <div className="hb-meas">
+                  <span className={`hb-meas-val${s.value > 0 ? '' : ' is-zero'}`}>
+                    {s.value !== undefined ? +(s.value / 1000).toFixed(2) : 0}
+                  </span>
+                  <span className="hb-meas-unit">{h.unit || ''}{h.targetValue ? ` / ${h.targetValue}` : ''}</span>
+                  <div className="hb-meas-btns">
+                    <button className="hb-step" onClick={() => stepMeasurable(s, -1)} aria-label={`Decrease ${h.name}`}>−</button>
+                    <button className="hb-step" onClick={() => stepMeasurable(s, 1)} aria-label={`Increase ${h.name}`}>+</button>
+                  </div>
                 </div>
+              ) : (
                 <button
                   className={`hb-check${s.done ? ' is-done' : ''}${poppedId === h.id ? ' pop' : ''}`}
-                  onClick={() => toggleTimerDone(s)}
+                  onClick={() => toggleBool(s)}
                   aria-label={s.done ? `Mark ${h.name} not done` : `Mark ${h.name} done`} aria-pressed={s.done}
                 >{s.done ? '✓' : ''}</button>
-              </>
-            ) : isNum ? (
-              <div className="hb-meas">
-                <span className={`hb-meas-val${s.value > 0 ? '' : ' is-zero'}`}>
-                  {s.value !== undefined ? +(s.value / 1000).toFixed(2) : 0}
-                </span>
-                <span className="hb-meas-unit">{h.unit || ''}{h.targetValue ? ` / ${h.targetValue}` : ''}</span>
-                <div className="hb-meas-btns">
-                  <button className="hb-step" onClick={() => stepMeasurable(s, -1)} aria-label={`Decrease ${h.name}`}>−</button>
-                  <button className="hb-step" onClick={() => stepMeasurable(s, 1)} aria-label={`Increase ${h.name}`}>+</button>
-                </div>
-              </div>
-            ) : (
-              <button
-                className={`hb-check${s.done ? ' is-done' : ''}${poppedId === h.id ? ' pop' : ''}`}
-                onClick={() => toggleBool(s)}
-                aria-label={s.done ? `Mark ${h.name} not done` : `Mark ${h.name} done`} aria-pressed={s.done}
-              >{s.done ? '✓' : ''}</button>
-            )}
+              )}
+            </div>
           </div>
         );
       })}
