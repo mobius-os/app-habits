@@ -163,14 +163,30 @@ export const CSS = `
   font-family: var(--font); font-size: 14px; font-weight: 700; border-radius: 9px; cursor: pointer; }
 .hb-seg button.is-active { background: var(--accent-hover, var(--accent)); color: var(--accent-fg); }
 
-/* emoji + palette pickers */
-.hb-emoji-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
-.hb-emoji-cell { min-height: 44px; aspect-ratio: 1; border: none; background: var(--bg); border-radius: 8px; font-size: 20px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center; }
+/* emoji + palette pickers — auto-fill/minmax grid, NOT a fixed column count
+   or a fixed cell size: repeat(10, 1fr) let each cell's own min-height:44px +
+   aspect-ratio:1 push the computed track width above the container's actual
+   1/10 share (a grid track's default min sizing is content-based, so it
+   grows past its 1fr allotment to fit a 44px item), bleeding cells off the
+   sheet's right edge on any phone narrower than ~520px — most phones. A
+   fixed-size cell in a wrapping flex row stops the overflow but leaves a dead
+   gap at the end of every full row, since fixed-size cells don't grow to use
+   the row's remaining width. auto-fill + minmax fits as many >=40px cells as
+   the row allows, THEN stretches all of them to share the row's full width
+   evenly — so a row is always either full-width or the genuinely-last,
+   partial row (never a lopsided gap), and it still can't overflow on any
+   screen. */
+.hb-emoji-grid, .hb-pal-grid { display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 6px; }
+.hb-emoji-cell { position: relative; aspect-ratio: 1; border: none; background: var(--bg);
+  border-radius: 8px; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .hb-emoji-cell.is-active { background: color-mix(in srgb, var(--accent) 20%, transparent); box-shadow: 0 0 0 2px var(--accent); }
-.hb-pal-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 7px; }
-.hb-pal-cell { min-height: 44px; aspect-ratio: 1; border-radius: 999px; border: 2px solid transparent; cursor: pointer; }
+.hb-pal-cell { position: relative; aspect-ratio: 1; border-radius: 999px; border: 2px solid transparent; cursor: pointer; }
 .hb-pal-cell.is-active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
+/* Belt-and-suspenders: cells land well above 44px on most screens once
+   stretched, but this keeps the tap target floor even on the rare knife-edge
+   width where a cell computes right at the 40px minimum. */
+.hb-emoji-cell::before, .hb-pal-cell::before { content: ''; position: absolute; inset: -3px; }
 
 /* weekday picker */
 .hb-week { display: flex; gap: 6px; }
