@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   VALUE, frequencyToFloat, isSuccess, dayCompletion,
   computeScores, strength, currentStreak, bestStreaks,
+  timerLiveElapsedMs, timerTargetReachedMs,
 } from './domain.js';
 
 // --- tiny date helper (mirrors domain's UTC string math) ---
@@ -149,4 +150,35 @@ test('bestStreaks: longest n, most-recent-end tiebreak', () => {
   for (let i = 0; i < 2; i++) t[d('2024-03-02', -i)] = VALUE.YES_MANUAL; // ends 03-02
   const tied = bestStreaks(dailyBool, t, 2);
   assert.equal(tied[0].end, '2024-03-02');
+});
+
+// --- in-app timer (Today's stopwatch) ---
+
+test('timerLiveElapsedMs: no record, or a record for a different day, reads as zero', () => {
+  assert.equal(timerLiveElapsedMs(null, TODAY, Date.now()), 0);
+  assert.equal(timerLiveElapsedMs(undefined, TODAY, Date.now()), 0);
+  // A day rollover: yesterday's record — running or not — never bleeds into
+  // today's stopwatch, even if it was left running overnight.
+  const yesterday = d(TODAY, -1);
+  assert.equal(timerLiveElapsedMs({ date: yesterday, elapsedMs: 90_000, runningSince: null }, TODAY, Date.now()), 0);
+  assert.equal(timerLiveElapsedMs({ date: yesterday, elapsedMs: 0, runningSince: Date.now() - 5000 }, TODAY, Date.now()), 0);
+});
+
+test('timerLiveElapsedMs: paused reads the committed elapsedMs; running adds the wall-clock delta', () => {
+  const now = Date.now();
+  assert.equal(timerLiveElapsedMs({ date: TODAY, elapsedMs: 42_000, runningSince: null }, TODAY, now), 42_000);
+  assert.equal(
+    timerLiveElapsedMs({ date: TODAY, elapsedMs: 10_000, runningSince: now - 30_000 }, TODAY, now),
+    40_000,
+  );
+});
+
+test('timerTargetReachedMs: only true once elapsed reaches a positive target', () => {
+  const timerHabit = { type: 'NUMERICAL', useTimer: true, targetType: 'AT_LEAST', targetValue: 15, unit: 'min' };
+  assert.equal(timerTargetReachedMs(timerHabit, 14 * 60_000), false);
+  assert.equal(timerTargetReachedMs(timerHabit, 15 * 60_000), true);
+  assert.equal(timerTargetReachedMs(timerHabit, 20 * 60_000), true);
+  // No target (0/undefined) can never auto-complete from the timer alone.
+  assert.equal(timerTargetReachedMs({ ...timerHabit, targetValue: 0 }, 999_999), false);
+  assert.equal(timerTargetReachedMs({ ...timerHabit, targetValue: undefined }, 999_999), false);
 });
