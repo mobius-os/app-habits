@@ -34,6 +34,18 @@ export async function saveHabits(habits) {
   await window.mobius.storage.set(HABITS, habits);
 }
 
+// Save one form submission while enforcing the timer invariant from the
+// REQUESTED final habit, not from a possibly already-persisted previous habit.
+// Clearing first makes retry safe across the two files: if the habits write
+// fails after cleanup, retry clears again and then finishes the save. A
+// disabled habit can therefore never successfully save while retaining a
+// hidden running stopwatch that would reappear when re-enabled.
+export async function saveHabitsWithTimerPolicy(habits, habit) {
+  if (!habit.useTimer) await clearTimerState(habit.id);
+  await saveHabits(habits);
+  return habits;
+}
+
 // --- per-day logs ---
 
 export async function getDayLog(dateStr) {
@@ -120,12 +132,58 @@ export function subscribeTimers(cb) {
   return window.mobius.storage.subscribe(TIMERS, (v) => cb(v || {}));
 }
 
-export function setTimerState(habitId, patch) {
+function currentTimerForDate(all, habitId, date) {
+  const current = all[habitId];
+  if (!current || current.date !== date) {
+    return { date, elapsedMs: 0, runningSince: null };
+  }
+  const elapsedMs = Number(current.elapsedMs);
+  const runningSince = current.runningSince == null ? null : Number(current.runningSince);
+  return {
+    date,
+    elapsedMs: Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0,
+    runningSince: Number.isFinite(runningSince) ? runningSince : null,
+  };
+}
+
+// Timer controls submit INTENT, not a patch derived from the last render.
+// Each command reads the state left by the previous command inside the timers
+// queue, so two immediate toggle taps are start -> pause rather than two stale
+// "start" writes.
+export function toggleTimerState(habitId, date, nowMs = Date.now()) {
   return enqueue(TIMERS, async () => {
     const all = (await window.mobius.storage.get(TIMERS)) || {};
-    const next = { ...all, [habitId]: { ...(all[habitId] || {}), ...patch } };
+    const current = currentTimerForDate(all, habitId, date);
+    const record = current.runningSince == null
+      ? { ...current, runningSince: nowMs }
+      : {
+        ...current,
+        elapsedMs: current.elapsedMs + Math.max(0, nowMs - current.runningSince),
+        runningSince: null,
+      };
+    const next = { ...all, [habitId]: record };
     await window.mobius.storage.set(TIMERS, next);
-    return next;
+    return record;
+  });
+}
+
+// Pause is deliberately idempotent and also reads inside the queue. Completion
+// can always issue it, even when a just-tapped start has not rendered yet, and
+// use the returned committed elapsed time for the check-in.
+export function pauseTimerState(habitId, date, nowMs = Date.now()) {
+  return enqueue(TIMERS, async () => {
+    const all = (await window.mobius.storage.get(TIMERS)) || {};
+    const current = currentTimerForDate(all, habitId, date);
+    const record = current.runningSince == null
+      ? current
+      : {
+        ...current,
+        elapsedMs: current.elapsedMs + Math.max(0, nowMs - current.runningSince),
+        runningSince: null,
+      };
+    const next = { ...all, [habitId]: record };
+    await window.mobius.storage.set(TIMERS, next);
+    return record;
   });
 }
 

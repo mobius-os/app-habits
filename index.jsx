@@ -311,17 +311,10 @@ export default function Habits({ appId, token }) {
       const prev = list.find((h) => h.id === habit.id);
       const exists = !!prev;
       const next = exists ? list.map((h) => (h.id === habit.id ? habit : h)) : [...list, habit];
-      await store.saveHabits(next);
-      // The timer was on and no longer is (toggled off, or the habit was
-      // switched away from NUMERICAL, which also forces useTimer false) —
-      // pause/clear its persisted stopwatch record. Otherwise a running or
-      // just-paused record survives underneath the disabled habit, and
-      // switching the timer back on later (same day) would silently resume
-      // counting from that stale `runningSince`/`elapsedMs`, crediting the
-      // entire hidden interval as if it had been running the whole time.
-      if (prev?.useTimer && !habit.useTimer) {
-        await store.clearTimerState(habit.id);
-      }
+      // The storage command derives cleanup from the requested FINAL state.
+      // If saving habits fails after clearing the timer, retry repeats cleanup
+      // instead of skipping it because habits.json already says "off".
+      await store.saveHabitsWithTimerPolicy(next, habit);
       if (!exists) {
         signal('item_created', {
           type: 'habit',
@@ -337,12 +330,16 @@ export default function Habits({ appId, token }) {
   // In-app stopwatch writes (Today's timer). Same visible, retryable-error
   // contract as every other user write — a failed start/pause/reset used to
   // become an unhandled rejection with no recovery UI.
-  const writeTimerState = useCallback((habit, patch) => attemptWrite(
-    'timerState', 'Couldn’t save the timer.', () => store.setTimerState(habit.id, patch),
+  const toggleTimerState = useCallback((habit, date, nowMs) => attemptWrite(
+    'timerToggle', 'Couldn’t save the timer.', () => store.toggleTimerState(habit.id, date, nowMs),
   ), [attemptWrite]);
 
-  const clearTimerWrite = useCallback((habit) => attemptWrite(
-    'timerClear', 'Couldn’t reset the timer.', () => store.clearTimerState(habit.id),
+  const pauseTimerState = useCallback((habit, date, nowMs) => attemptWrite(
+    'timerPause', 'Couldn’t save the timer.', () => store.pauseTimerState(habit.id, date, nowMs),
+  ), [attemptWrite]);
+
+  const resetTimerState = useCallback((habit) => attemptWrite(
+    'timerReset', 'Couldn’t reset the timer.', () => store.clearTimerState(habit.id),
   ), [attemptWrite]);
 
   const deleteHabit = useCallback((id) => attemptWrite(
@@ -403,8 +400,9 @@ export default function Habits({ appId, token }) {
                   onSetValue={(h, v) => setValue(h, today, v)}
                   onAdjust={(h, deltaRaw) => adjustValue(h, today, deltaRaw)}
                   onOpenDetail={openDetail}
-                  onTimerWrite={writeTimerState}
-                  onTimerClear={clearTimerWrite}
+                  onTimerToggle={toggleTimerState}
+                  onTimerPause={pauseTimerState}
+                  onTimerReset={resetTimerState}
                 />
               </div>
             ) : (

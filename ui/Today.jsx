@@ -28,7 +28,8 @@ function formatClock(ms) {
 }
 
 export function Today({
-  habits, todayLog, allLogs, today, onSetValue, onAdjust, onOpenDetail, onTimerWrite, onTimerClear,
+  habits, todayLog, allLogs, today, onSetValue, onAdjust, onOpenDetail,
+  onTimerToggle, onTimerPause, onTimerReset,
 }) {
   const [burst, setBurst] = useState(null);     // {id, colors} | null
   const [toast, setToast] = useState(null);
@@ -146,23 +147,15 @@ export function Today({
     }
   }
 
-  // Start/pause the in-app stopwatch. `runningSince` is a wall-clock timestamp,
-  // so the elapsed time stays correct even if the app is closed and reopened
-  // mid-timer — see storage.js. Routed through the parent's attemptWrite (same
-  // visible, retryable-error contract as every other user write): a failed
-  // start/pause used to vanish as an unhandled rejection with the button just
-  // silently not responding.
+  // Send a toggle INTENT. Storage decides start vs pause from the latest
+  // serialized record, so two taps before React renders again still mean
+  // start -> pause rather than two stale "start" patches.
   async function toggleTimer(s) {
-    const h = s.habit;
-    await onTimerWrite(h, {
-      date: today,
-      elapsedMs: s.timerElapsedMs,
-      runningSince: s.timerRunning ? null : Date.now(),
-    });
+    await onTimerToggle(s.habit, today, Date.now());
   }
 
   async function resetTimer(s) {
-    await onTimerClear(s.habit);
+    await onTimerReset(s.habit);
   }
 
   // Reached the target while running: pause, persist the committed elapsed
@@ -170,12 +163,12 @@ export function Today({
   async function completeFromTimer(s) {
     const h = s.habit;
     const wasDone = s.done;
-    const paused = await onTimerWrite(h, { date: today, elapsedMs: s.timerElapsedMs, runningSince: null });
+    const paused = await onTimerPause(h, today, Date.now());
     // The pause write failed (attemptWrite already surfaced the retry banner):
     // bail out rather than log a check-in against a timer that's still
     // "running" as far as storage is concerned.
     if (paused === undefined) return;
-    const raw = Math.round((s.timerElapsedMs / 60000) * 1000);
+    const raw = Math.round((paused.elapsedMs / 60000) * 1000);
     const projected = currentStreak(h, { ...s.entries, [today]: raw }, today);
     const ok = await onSetValue(h, raw);
     if (ok) { signalDayComplete(wasDone); celebrate(h, projected); }
@@ -189,11 +182,11 @@ export function Today({
     const h = s.habit;
     if (s.done) { await onSetValue(h, null); return; }
     const wasDone = s.done;
-    if (s.timerRunning) {
-      const paused = await onTimerWrite(h, { date: today, elapsedMs: s.timerElapsedMs, runningSince: null });
-      if (paused === undefined) return; // pause failed; leave the timer running rather than log a check-in on top of it
-    }
-    const minutes = Math.max(s.timerElapsedMs / 60000, h.targetValue || 0);
+    // Always pause through the command boundary. A start tap may already be
+    // queued even though this render still says "not running".
+    const paused = await onTimerPause(h, today, Date.now());
+    if (paused === undefined) return;
+    const minutes = Math.max(paused.elapsedMs / 60000, h.targetValue || 0);
     const raw = Math.round(minutes * 1000);
     const projected = currentStreak(h, { ...s.entries, [today]: raw }, today);
     const ok = await onSetValue(h, raw);
