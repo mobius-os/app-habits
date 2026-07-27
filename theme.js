@@ -10,6 +10,13 @@ export const CSS = `
   -webkit-tap-highlight-color: transparent; }
 .hb-root :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
+/* Keep the app canvas full-width, but cap the working column on web so
+   one-column habit cards stay comfortably scannable. Phones remain full-width. */
+.hb-page { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; }
+@media (min-width: 760px) {
+  .hb-page { max-width: 720px; margin-inline: auto; }
+}
+
 /* header */
 .hb-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: calc(14px + env(safe-area-inset-top)) 16px 10px; }
