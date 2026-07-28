@@ -3,6 +3,7 @@
 // theme tokens; per-habit accent is passed as the `--hb-accent` CSS var.
 
 import { useMemo, useState, useEffect, useRef } from 'react';
+import { X } from '@openai/apps-sdk-ui/components/Icon';
 
 let sheetTitleSeq = 0;
 
@@ -189,7 +190,9 @@ export function ErrorBanner({ message, onRetry, onDismiss }) {
     <div className="hb-errbar" role="alert">
       <span className="hb-errbar-msg">{message}</span>
       <button type="button" className="hb-errbar-retry" onClick={onRetry}>Retry</button>
-      <button type="button" className="hb-errbar-x" onClick={onDismiss} aria-label="Dismiss">✕</button>
+      <button type="button" className="hb-errbar-x" onClick={onDismiss} aria-label="Dismiss">
+        <X width={16} height={16} aria-hidden="true" />
+      </button>
     </div>
   );
 }

@@ -29,7 +29,8 @@
   "runtime": {
     "imports": [
       "react",
-      "recharts"
+      "recharts",
+      "@openai/apps-sdk-ui/components/Icon"
     ],
     "esm_deps": []
   },

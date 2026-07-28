@@ -3,6 +3,7 @@
 // (tap to backfill), best streaks, and weekday frequency.
 
 import { useMemo, Fragment } from 'react';
+import { ArrowLeft, Pencil } from '@openai/apps-sdk-ui/components/Icon';
 import { Ring } from './Chrome.jsx';
 import { ScoreChart, HistoryBars } from './Charts.jsx';
 import { Heatmap } from './Heatmap.jsx';
@@ -80,12 +81,16 @@ export function Detail({ habit, allLogs, todayLog, today, onBack, onEdit, onSetV
   return (
     <>
       <div className="hb-detail-head" style={{ '--hb-accent': acc }}>
-        <button className="hb-back" onClick={onBack} aria-label="Back">‹</button>
+        <button className="hb-back" onClick={onBack} aria-label="Back">
+          <ArrowLeft width={18} height={18} aria-hidden="true" />
+        </button>
         <div className="hb-detail-title" style={{ flex: 1 }}>
           <span className="hb-dt-em">{habit.emoji}</span>
           <h2>{habit.name}</h2>
         </div>
-        <button className="hb-back" onClick={onEdit} aria-label="Edit habit">✎</button>
+        <button className="hb-back" onClick={onEdit} aria-label="Edit habit">
+          <Pencil width={18} height={18} aria-hidden="true" />
+        </button>
       </div>
 
       <div className="hb-scroll" style={{ '--hb-accent': acc }}>
