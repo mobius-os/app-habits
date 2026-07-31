@@ -176,8 +176,8 @@ export const CSS = `
 .hb-input-static { display: flex; align-items: center; color: var(--muted); font-weight: 650; }
 
 /* segmented control */
-.hb-seg { display: flex; gap: 4px; padding: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
-.hb-seg button { flex: 1; min-height: 44px; border: none; background: transparent; color: var(--muted);
+.hb-seg { display: flex; gap: 2px; height: 44px; background: var(--bg); border: 0; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--border); }
+.hb-seg button { flex: 1; box-sizing: border-box; min-height: 44px; border: none; background: transparent; color: var(--muted);
   font-family: var(--font); font-size: 14px; font-weight: 700; border-radius: 9px; cursor: pointer; }
 .hb-seg button.is-active { background: var(--accent-hover, var(--accent)); color: var(--accent-fg); }
 
