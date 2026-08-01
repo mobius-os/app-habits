@@ -3,6 +3,7 @@
 // Checking off fires a celebratory confetti burst + a streak toast.
 
 import { useMemo, useState, useRef, useEffect } from 'react';
+import { Check, Minus, Pause, Play, Plus } from '@openai/apps-sdk-ui/components/Icon';
 import { Ring, Confetti, Toast, EmptyState } from './Chrome.jsx';
 import { entriesForHabit, subscribeTimers } from '../storage.js';
 import { accent, freqLabel } from '../constants.js';
@@ -281,13 +282,15 @@ export function Today({
                       className={`hb-timer-play${s.timerRunning ? ' is-running' : ''}`}
                       onClick={() => toggleTimer(s)}
                       aria-label={s.timerRunning ? `Pause ${h.name} timer` : `Start ${h.name} timer`}
-                    >{s.timerRunning ? '⏸' : '▶'}</button>
+                    >{s.timerRunning
+                      ? <Pause width="1em" height="1em" aria-hidden="true" />
+                      : <Play width="1em" height="1em" aria-hidden="true" />}</button>
                   </div>
                   <button
                     className={`hb-check${s.done ? ' is-done' : ''}${poppedId === h.id ? ' pop' : ''}`}
                     onClick={() => toggleTimerDone(s)}
                     aria-label={s.done ? `Mark ${h.name} not done` : `Mark ${h.name} done`} aria-pressed={s.done}
-                  >{s.done ? '✓' : ''}</button>
+                  >{s.done ? <Check width="1em" height="1em" aria-hidden="true" /> : null}</button>
                 </>
               ) : isNum ? (
                 <div className="hb-meas">
@@ -296,8 +299,8 @@ export function Today({
                   </span>
                   <span className="hb-meas-unit">{h.unit || ''}{h.targetValue ? ` / ${h.targetValue}` : ''}</span>
                   <div className="hb-meas-btns">
-                    <button className="hb-step" onClick={() => stepMeasurable(s, -1)} aria-label={`Decrease ${h.name}`}>−</button>
-                    <button className="hb-step" onClick={() => stepMeasurable(s, 1)} aria-label={`Increase ${h.name}`}>+</button>
+                    <button className="hb-step" onClick={() => stepMeasurable(s, -1)} aria-label={`Decrease ${h.name}`}><Minus width="1em" height="1em" aria-hidden="true" /></button>
+                    <button className="hb-step" onClick={() => stepMeasurable(s, 1)} aria-label={`Increase ${h.name}`}><Plus width="1em" height="1em" aria-hidden="true" /></button>
                   </div>
                 </div>
               ) : (
@@ -305,7 +308,7 @@ export function Today({
                   className={`hb-check${s.done ? ' is-done' : ''}${poppedId === h.id ? ' pop' : ''}`}
                   onClick={() => toggleBool(s)}
                   aria-label={s.done ? `Mark ${h.name} not done` : `Mark ${h.name} done`} aria-pressed={s.done}
-                >{s.done ? '✓' : ''}</button>
+                >{s.done ? <Check width="1em" height="1em" aria-hidden="true" /> : null}</button>
               )}
             </div>
           </div>
