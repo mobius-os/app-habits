@@ -308,4 +308,5 @@ export const CSS = `
   .hb-check, .hb-add, .hb-btn, .hb-hero-fill, .hb-ring-fill { transition: none; }
   .hb-check.pop, .hb-confetti, .hb-sheet, .hb-scrim, .hb-toast, .hb-errbar { animation: none; }
 }
+.hb-check svg, .hb-step svg, .hb-timer-play svg, .hb-cell svg { display: block; width: 1em; height: 1em; }
 `;

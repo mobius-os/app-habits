@@ -3,6 +3,7 @@
 // (✓ → ✗ → skip → clear); measurable cells show the amount and open the detail.
 
 import { useMemo } from 'react';
+import { Check, Minus, X } from '@openai/apps-sdk-ui/components/Icon';
 import { accent } from '../constants.js';
 import { VALUE, isSuccess } from '../domain.js';
 import { EmptyState } from './Chrome.jsx';
@@ -89,17 +90,17 @@ export function AllHabits({ habits, allLogs, todayLog, today, onOpenDetail, onSe
                   );
                 }
                 let cls = '';
-                let glyph = '';
-                if (v === VALUE.YES_MANUAL || v === VALUE.YES_AUTO) { cls = ' is-yes'; glyph = '✓'; }
-                else if (v === VALUE.NO) { cls = ' is-no'; glyph = '✕'; }
-                else if (v === VALUE.SKIP) { cls = ' is-skip'; glyph = '–'; }
+                let Glyph = null;
+                if (v === VALUE.YES_MANUAL || v === VALUE.YES_AUTO) { cls = ' is-yes'; Glyph = Check; }
+                else if (v === VALUE.NO) { cls = ' is-no'; Glyph = X; }
+                else if (v === VALUE.SKIP) { cls = ' is-skip'; Glyph = Minus; }
                 return (
                   <td key={d}>
                     <div
                       className={`hb-cell${cls}`} onClick={() => cycle(h, d, v)}
                       role="button" tabIndex={0} aria-label={`Toggle ${h.name} ${d}`}
                       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cycle(h, d, v); } }}
-                    >{glyph}</div>
+                    >{Glyph ? <Glyph width="1em" height="1em" aria-hidden="true" /> : null}</div>
                   </td>
                 );
               })}
