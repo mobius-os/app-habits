@@ -14,11 +14,11 @@ let sheetTitleSeq = 0;
 export function AppMark({ appId, fallback = '🔥' }) {
   const [failed, setFailed] = useState(false);
   if (failed || !appId) {
-    return <span className="hb-mark" aria-hidden="true">{fallback}</span>;
+    return <span className="hb-mark" ref={(el) => el && window.mobius.immersive && window.mobius.immersive.holdToToggle(el)} aria-hidden="true">{fallback}</span>;
   }
   return (
     <img
-      className="hb-mark hb-mark-img" src={`/api/apps/${appId}/icon?size=128`}
+      className="hb-mark hb-mark-img" ref={(el) => el && window.mobius.immersive && window.mobius.immersive.holdToToggle(el)} src={`/api/apps/${appId}/icon?size=128`}
       alt="" aria-hidden="true" onError={() => setFailed(true)}
     />
   );
