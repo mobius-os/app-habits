@@ -369,6 +369,18 @@ export default function Habits({ appId, token }) {
     <div className="hb-root">
       <style>{CSS}</style>
 
+      {!detailHabit && (
+        <header className="hb-header">
+          <div className="hb-header-inner">
+            <div className="hb-brand">
+              <AppMark appId={appId} />
+              <h1 className="hb-title">Habits</h1>
+            </div>
+            <button className="hb-add" onClick={() => openForm({ mode: 'new' })}>+ New</button>
+          </div>
+        </header>
+      )}
+
       <div className="hb-page">
         {detailHabit ? (
           <Detail
@@ -380,14 +392,6 @@ export default function Habits({ appId, token }) {
           />
         ) : (
           <>
-            <header className="hb-header">
-              <div className="hb-brand">
-                <AppMark appId={appId} />
-                <h1 className="hb-title">Habits</h1>
-              </div>
-              <button className="hb-add" onClick={() => openForm({ mode: 'new' })}>+ New</button>
-            </header>
-
             <div className="hb-tabs" role="tablist" aria-label="Habit views">
               <button id="hb-tab-today" ref={(node) => { tabRefs.current[0] = node }} className={`hb-tab${tab === 'today' ? ' is-active' : ''}`} onClick={() => setTab('today')} onKeyDown={(event) => onTabKeyDown(event, 0)} role="tab" aria-selected={tab === 'today'} aria-controls="hb-panel-today" tabIndex={tab === 'today' ? 0 : -1}>Today</button>
               <button id="hb-tab-all" ref={(node) => { tabRefs.current[1] = node }} className={`hb-tab${tab === 'all' ? ' is-active' : ''}`} onClick={() => setTab('all')} onKeyDown={(event) => onTabKeyDown(event, 1)} role="tab" aria-selected={tab === 'all'} aria-controls="hb-panel-all" tabIndex={tab === 'all' ? 0 : -1}>All Habits</button>

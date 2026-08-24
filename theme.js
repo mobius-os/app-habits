@@ -18,8 +18,9 @@ export const CSS = `
 }
 
 /* header */
-.hb-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: calc(14px + env(safe-area-inset-top)) 16px 10px; }
+.hb-header { flex: 0 0 auto; width: 100%; background: var(--bg); border-bottom: 1px solid var(--border); }
+.hb-header-inner { width: 100%; max-width: 720px; margin-inline: auto; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; padding: calc(14px + env(safe-area-inset-top)) 16px 10px; }
 .hb-brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .hb-mark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 11px; display: flex;
   align-items: center; justify-content: center; font-size: 19px;
@@ -309,4 +310,22 @@ export const CSS = `
   .hb-check.pop, .hb-confetti, .hb-sheet, .hb-scrim, .hb-toast, .hb-errbar { animation: none; }
 }
 .hb-check svg, .hb-step svg, .hb-timer-play svg, .hb-cell svg { display: block; width: 1em; height: 1em; }
+
+/* mobius-ui:CenteredRail v1 */
+@media (min-width: 900px) {
+  .hb-root {
+    background: radial-gradient(ellipse 62% 88% at 50% 48%,
+      color-mix(in srgb, var(--accent) 9%, var(--surface)) 0%,
+      color-mix(in srgb, var(--accent) 3%, var(--surface)) 38%,
+      var(--surface) 100%);
+  }
+  .hb-root::before {
+    content: ""; position: absolute; inset-block: 0; left: 50%;
+    width: min(100%, 720px); transform: translateX(-50%);
+    background: var(--bg); pointer-events: none;
+  }
+  .hb-header { width: min(100%, 720px); margin-inline: auto; }
+
+}
+/* /mobius-ui:CenteredRail */
 `;
