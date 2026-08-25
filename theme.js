@@ -18,15 +18,16 @@ export const CSS = `
 }
 
 /* header */
-.hb-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: calc(14px + env(safe-area-inset-top)) 16px 10px; }
+.hb-header { flex: 0 0 auto; width: 100%; background: var(--bg); border-bottom: 1px solid var(--border); }
+.hb-header-inner { width: 100%; max-width: 760px; margin-inline: auto; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; padding: calc(14px + env(safe-area-inset-top)) 16px 10px; }
 .hb-brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .hb-mark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 11px; display: flex;
   align-items: center; justify-content: center; font-size: 19px;
   background: linear-gradient(150deg, #10b981, #f59e0b); box-shadow: 0 4px 14px rgba(16,185,129,0.35); }
 /* the real installed icon variant — show the logo itself, no gradient tile */
 .hb-mark-img { object-fit: contain; background: none; box-shadow: none; }
-.hb-title { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+.hb-title { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; }
 .hb-add { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px;
   border: none; border-radius: 12px; background: var(--accent-hover, var(--accent)); color: var(--accent-fg);
   font-family: var(--font); font-size: 15px; font-weight: 700; cursor: pointer;
@@ -309,4 +310,13 @@ export const CSS = `
   .hb-check.pop, .hb-confetti, .hb-sheet, .hb-scrim, .hb-toast, .hb-errbar { animation: none; }
 }
 .hb-check svg, .hb-step svg, .hb-timer-play svg, .hb-cell svg { display: block; width: 1em; height: 1em; }
+
+/* mobius-ui:CenteredRail v1 */
+@media (min-width: 900px) {
+  .hb-root {
+
+  }
+  .hb-header { width: min(100%, 760px); margin-inline: auto; }
+}
+/* /mobius-ui:CenteredRail */
 `;
