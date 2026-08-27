@@ -1,8 +1,9 @@
 // The Habits app stylesheet — one scoped CSS string rendered once at the root as
 // <style>{CSS}</style>. Class prefix `hb-`. Color comes from theme tokens for
 // chrome (var(--bg) etc.); per-habit accent is passed via inline style as
-// `--hb-accent` so the same classes tint per card. Playful: soft cards, springy
-// taps, a celebratory check pop, a gradient hero. Honors prefers-reduced-motion.
+// `--hb-accent` so the same classes tint per card. Playful: crisp cards, springy
+// taps, a celebratory check pop, and a gradient hero without decorative glow.
+// Honors prefers-reduced-motion.
 
 export const CSS = `
 .hb-root { position: relative; display: flex; flex-direction: column; height: 100%;
@@ -18,13 +19,14 @@ export const CSS = `
 }
 
 /* header */
-.hb-header { flex: 0 0 auto; width: 100%; background: var(--bg); border-bottom: 1px solid var(--border); }
-.hb-header-inner { width: 100%; max-width: 760px; margin-inline: auto; display: flex; align-items: center;
+.hb-header { flex: 0 0 auto; width: 100%; background: var(--bg); }
+.hb-header-inner { position: relative; width: 100%; max-width: 760px; margin-inline: auto; display: flex; align-items: center;
   justify-content: space-between; gap: 12px; padding: calc(14px + env(safe-area-inset-top)) 16px 10px; }
+.hb-header-inner::after { content: ''; position: absolute; inset-inline: 16px; bottom: 0; height: 1px; background: var(--border); }
 .hb-brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .hb-mark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 11px; display: flex;
   align-items: center; justify-content: center; font-size: 19px;
-  background: linear-gradient(150deg, #10b981, #f59e0b); box-shadow: 0 4px 14px rgba(16,185,129,0.35); }
+  background: linear-gradient(150deg, #10b981, #f59e0b); }
 /* the real installed icon variant — show the logo itself, no gradient tile */
 .hb-mark-img { object-fit: contain; background: none; box-shadow: none; }
 .hb-title { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.015em; }
@@ -50,8 +52,7 @@ export const CSS = `
 /* hero strip */
 .hb-hero { position: relative; overflow: hidden; border-radius: 16px; padding: 18px 18px;
   background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 88%, #000 0%),
-    color-mix(in srgb, var(--accent) 55%, #7c3aed 45%)); color: var(--accent-fg);
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 28%, transparent); }
+    color-mix(in srgb, var(--accent) 55%, #7c3aed 45%)); color: var(--accent-fg); }
 .hb-hero-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .hb-hero-count { font-size: 30px; font-weight: 850; letter-spacing: -0.02em; line-height: 1; }
 .hb-hero-count small { font-size: 16px; font-weight: 700; opacity: 0.85; }
@@ -68,9 +69,8 @@ export const CSS = `
 .hb-card { display: flex; flex-wrap: wrap; align-items: center; gap: 13px; row-gap: 8px;
   padding: 13px 14px; border-radius: 12px;
   background: var(--surface); border: 1px solid var(--border);
-  transition: transform .12s ease, box-shadow .2s ease; }
-.hb-card.is-done { box-shadow: 0 4px 18px color-mix(in srgb, var(--hb-accent) 22%, transparent);
-  border-color: color-mix(in srgb, var(--hb-accent) 45%, var(--border)); }
+  transition: transform .12s ease, border-color .2s ease; }
+.hb-card.is-done { border-color: color-mix(in srgb, var(--hb-accent) 45%, var(--border)); }
 .hb-emoji { flex: 0 0 auto; width: 46px; height: 46px; border-radius: 12px; display: flex;
   align-items: center; justify-content: center; font-size: 24px;
   background: color-mix(in srgb, var(--hb-accent) 16%, transparent); }
