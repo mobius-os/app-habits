@@ -20,6 +20,11 @@ test('top-pinned headers and scroll bottom include safe-area insets', () => {
   assert.match(css, /\.hb-scroll[^}]*env\(safe-area-inset-bottom\)/, 'scroll content needs bottom safe-area padding');
 });
 
+test('compact header divider stays inset from both pane edges', () => {
+  assert.doesNotMatch(css, /\.hb-header-inner\s*\{[^}]*border-bottom/s);
+  assert.match(css, /\.hb-header-inner::after\s*\{[^}]*inset-inline:\s*16px[^}]*background:\s*var\(--border\)/s);
+});
+
 test('view tabs use roving focus, arrow keys, and labelled tab panels', () => {
   assert.match(index, /tabIndex=\{tab === 'today' \? 0 : -1\}/);
   assert.match(index, /event\.key === 'ArrowRight'/);

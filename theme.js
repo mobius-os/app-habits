@@ -20,8 +20,9 @@ export const CSS = `
 
 /* header */
 .hb-header { flex: 0 0 auto; width: 100%; background: var(--bg); }
-.hb-header-inner { width: 100%; max-width: 760px; margin-inline: auto; display: flex; align-items: center;
-  justify-content: space-between; gap: 12px; padding: calc(14px + env(safe-area-inset-top)) 16px 10px; border-bottom: 1px solid var(--border); }
+.hb-header-inner { position: relative; width: 100%; max-width: 760px; margin-inline: auto; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; padding: calc(14px + env(safe-area-inset-top)) 16px 10px; }
+.hb-header-inner::after { content: ''; position: absolute; inset-inline: 16px; bottom: 0; height: 1px; background: var(--border); }
 .hb-brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .hb-mark { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 11px; display: flex;
   align-items: center; justify-content: center; font-size: 19px;
