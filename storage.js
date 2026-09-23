@@ -2,14 +2,106 @@
 //
 // Layout:
 //   habits.json            -> Habit[]            (small, single array)
-//   logs/<YYYY-MM-DD>.json  -> { habitId: value } (one file per day; last-write-
-//                                                   wins per path, so concurrent
-//                                                   edits to different days never
-//                                                   clobber each other)
+//   logs/<YYYY-MM-DD>.json  -> { habitId: value, _mobius: intent metadata }
+// One file per day keeps reads compact. Each mutation also carries a bounded,
+// idempotent field intent so disjoint same-day changes from offline devices can
+// be replayed over the remote winner instead of replacing the whole day.
 
 const HABITS = 'habits.json';
 const logPath = (dateStr) => `logs/${dateStr}.json`;
 const TIMERS = 'timers.json';
+const DAY_META = '_mobius';
+const MAX_APPLIED_DAY_INTENTS = 512;
+
+const conflictContexts = (context) => (
+  context?.kind === 'mobius-conflict-context-batch'
+  && context?.version === 1 && Array.isArray(context.items)
+    ? context.items.flatMap(conflictContexts)
+    : [context]
+);
+
+function intentId() {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function publicDayLog(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const { [DAY_META]: _meta, ...values } = raw;
+  return values;
+}
+
+function applyDayIntent(raw, intent) {
+  const next = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {};
+  const previousMeta = next[DAY_META] && typeof next[DAY_META] === 'object' ? next[DAY_META] : {};
+  const applied = Array.isArray(previousMeta.applied) ? previousMeta.applied : [];
+  if (intent.operation === 'adjust' && applied.includes(intent.id)) return next;
+  if (intent.operation === 'delete') delete next[intent.habitId];
+  else if (intent.operation === 'adjust') {
+    const current = typeof next[intent.habitId] === 'number' && next[intent.habitId] >= 0
+      ? next[intent.habitId]
+      : 0;
+    next[intent.habitId] = Math.max(intent.floor || 0, current + intent.deltaRaw);
+  } else next[intent.habitId] = intent.value;
+  // Absolute set/delete intents are naturally idempotent and keep the legacy
+  // plain day-log shape. Deltas need a bounded applied-id ledger so a replay
+  // after frame teardown can never increment the same amount twice.
+  if (intent.operation === 'adjust') {
+    next[DAY_META] = {
+      version: 1,
+      applied: [...applied, intent.id].slice(-MAX_APPLIED_DAY_INTENTS),
+    };
+  }
+  return next;
+}
+
+let recoveryStorage = null;
+let detachRecovery = null;
+let recoveredIntents = new Set();
+function ensureDayConflictRecovery() {
+  const storage = window.mobius?.storage;
+  if (storage === recoveryStorage) return;
+  try { detachRecovery?.(); } catch {}
+  recoveryStorage = storage;
+  detachRecovery = null;
+  recoveredIntents = new Set();
+  if (!storage?.onConflict || !storage?.getWithVersion || !storage?.durableWrite) return;
+  detachRecovery = storage.onConflict(async (conflict) => {
+    const context = conflict?.conflictContext;
+    const intents = conflictContexts(context);
+    if (!/^logs\/\d{4}-\d{2}-\d{2}\.json$/.test(String(conflict?.path || ''))
+        || !intents.length || intents.some((intent) => (
+          intent?.kind !== 'habits-day-entry' || !intent.id || !intent.habitId
+        ))) return false;
+    if (intents.every((intent) => recoveredIntents.has(intent.id))) return true;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const current = await storage.getWithVersion(conflict.path, 'json');
+      const raw = current?.value || {};
+      const applied = raw?.[DAY_META]?.applied || [];
+      const remaining = intents.filter((intent) => (
+        !recoveredIntents.has(intent.id) && !applied.includes(intent.id)
+      ));
+      if (!remaining.length) {
+        for (const intent of intents) recoveredIntents.add(intent.id);
+        return true;
+      }
+      const merged = remaining.reduce(applyDayIntent, raw);
+      try {
+        await storage.durableWrite(conflict.path, merged, {
+          kind: 'json',
+          ...(current?.version ? { ifMatch: current.version } : { ifNoneMatch: true }),
+          conflictContext: context,
+        });
+        for (const intent of intents) recoveredIntents.add(intent.id);
+        return true;
+      } catch (error) {
+        if (error?.code !== 'conflict') throw error;
+      }
+    }
+    return false;
+  });
+}
 
 // Local-calendar date string (the user's "today"); domain treats date strings as
 // opaque ordered labels, so local-vs-UTC only affects which day a tap lands on.
@@ -49,11 +141,13 @@ export async function saveHabitsWithTimerPolicy(habits, habit) {
 // --- per-day logs ---
 
 export async function getDayLog(dateStr) {
-  return (await window.mobius.storage.get(logPath(dateStr))) || {};
+  ensureDayConflictRecovery();
+  return publicDayLog(await window.mobius.storage.get(logPath(dateStr)));
 }
 
 export function subscribeDayLog(dateStr, cb) {
-  return window.mobius.storage.subscribe(logPath(dateStr), (v) => cb(v || {}));
+  ensureDayConflictRecovery();
+  return window.mobius.storage.subscribe(logPath(dateStr), (v) => cb(publicDayLog(v)));
 }
 
 // Per-path write queue. window.mobius.storage is last-write-wins and NOT
@@ -73,12 +167,12 @@ function enqueue(path, fn) {
 // Serialized read-modify-write of the single day file; returns the updated log.
 export function setEntry(dateStr, habitId, value) {
   return enqueue(logPath(dateStr), async () => {
-    const log = await getDayLog(dateStr);
-    const next = { ...log };
-    if (value === undefined || value === null) delete next[habitId];
-    else next[habitId] = value;
-    await window.mobius.storage.set(logPath(dateStr), next);
-    return next;
+    const intent = {
+      kind: 'habits-day-entry', id: intentId(), habitId,
+      operation: value === undefined || value === null ? 'delete' : 'set',
+      value,
+    };
+    return writeDayIntent(dateStr, intent);
   });
 }
 
@@ -89,13 +183,31 @@ export function setEntry(dateStr, habitId, value) {
 // Returns the updated log.
 export function adjustEntry(dateStr, habitId, deltaRaw, floor = 0) {
   return enqueue(logPath(dateStr), async () => {
-    const log = await getDayLog(dateStr);
-    const cur = log[habitId];
-    const base = typeof cur === 'number' && cur >= 0 ? cur : 0;
-    const next = { ...log, [habitId]: Math.max(floor, base + deltaRaw) };
-    await window.mobius.storage.set(logPath(dateStr), next);
-    return next;
+    return writeDayIntent(dateStr, {
+      kind: 'habits-day-entry', id: intentId(), habitId,
+      operation: 'adjust', deltaRaw, floor,
+    });
   });
+}
+
+async function writeDayIntent(dateStr, intent) {
+  ensureDayConflictRecovery();
+  const storage = window.mobius.storage;
+  const path = logPath(dateStr);
+  if (storage.getWithVersion && storage.durableWrite && storage.onConflict) {
+    const current = await storage.getWithVersion(path, 'json');
+    const next = applyDayIntent(current?.value || {}, intent);
+    await storage.durableWrite(path, next, {
+      kind: 'json',
+      ...(current?.version ? { ifMatch: current.version } : { ifNoneMatch: true }),
+      conflictContext: intent,
+    });
+    return publicDayLog(next);
+  }
+  const current = (await storage.get(path)) || {};
+  const next = applyDayIntent(current, intent);
+  await storage.set(path, next);
+  return publicDayLog(next);
 }
 
 // Scrub a habit's id from every day-log when the habit is deleted, so its
@@ -107,11 +219,7 @@ export async function purgeHabit(habitId) {
     await Promise.all(
       Object.entries(all).map(([dateStr, log]) => {
         if (!Object.prototype.hasOwnProperty.call(log, habitId)) return null;
-        return enqueue(logPath(dateStr), async () => {
-          const cur = await getDayLog(dateStr);
-          delete cur[habitId];
-          await window.mobius.storage.set(logPath(dateStr), cur);
-        });
+        return setEntry(dateStr, habitId, null);
       }),
     );
   }
@@ -201,20 +309,29 @@ export function clearTimerState(habitId) {
 
 // Enumerate every day-log and read it into { 'YYYY-MM-DD': { habitId: value } }.
 export async function loadAllLogs() {
-  const entries = await window.mobius.storage.list('logs/');
-  if (entries === null) return null;
-  if (!entries) return {};
+  const storage = window.mobius.storage;
+  ensureDayConflictRecovery();
+  const listing = typeof storage.listWithStatus === 'function'
+    ? await storage.listWithStatus('logs/')
+    : { entries: await storage.list('logs/'), complete: window.mobius?.online !== false };
+  // A partial history is useful internally but unsafe as the authoritative
+  // analytics/purge input. Keep the previous in-memory view until a complete
+  // server or last-known snapshot is available.
+  if (!listing || listing.complete !== true) return null;
+  const entries = listing.entries || [];
   const out = {};
+  let bodiesComplete = true;
   await Promise.all(
     entries
       .filter((e) => e.type === 'file' && e.name.endsWith('.json'))
       .map(async (e) => {
         const dateStr = e.name.replace(/\.json$/, '');
         const log = await window.mobius.storage.get(e.path);
-        if (log && typeof log === 'object') out[dateStr] = log;
+        if (log && typeof log === 'object') out[dateStr] = publicDayLog(log);
+        else bodiesComplete = false;
       }),
   );
-  return out;
+  return bodiesComplete ? out : null;
 }
 
 // Transform day-keyed logs into a per-habit { 'YYYY-MM-DD': value } map, which is
