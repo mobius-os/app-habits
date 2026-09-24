@@ -205,22 +205,27 @@ test('an ordered day-intent batch preserves multiple edits and a reversal', asyn
   );
   assert.deepEqual(writes[0].options.conflictContext, context);
 });
-test('a queued recovery remains eligible for a consecutive conflict', async (t) => {
+test('a queued recovery never treats its pending adjustment overlay as server confirmation', async (t) => {
   const previousWindow = globalThis.window;
   t.after(() => { globalThis.window = previousWindow; });
   let listener;
+  let phase = 'initial';
   let recovering = false;
   let recoveryWrites = 0;
   const context = {
-    kind: 'habits-day-entry', id: 'walk-on', habitId: 'walk', operation: 'set', value: 1,
+    kind: 'habits-day-entry', id: 'walk-plus', habitId: 'walk', operation: 'adjust', deltaRaw: 1000,
   };
   globalThis.window = {
     mobius: {
       storage: {
         onConflict(cb) { listener = cb; return () => {}; },
         async getWithVersion() {
-          return { value: { read: 1 }, version: `remote-v${recoveryWrites + 2}` };
+          if (phase === 'overlay') return {
+            value: { read: 1, walk: 1000, _mobius: { applied: ['walk-plus'] } }, version: 'remote-v2',
+          };
+          return { value: { read: 1 }, version: 'remote-v3' };
         },
+        pendingCount: async () => phase === 'overlay' ? 1 : 0,
         async durableWrite() {
           if (!recovering) return { durability: 'synced' };
           recoveryWrites += 1;
@@ -231,9 +236,13 @@ test('a queued recovery remains eligible for a consecutive conflict', async (t) 
   };
 
   await setEntry('2026-09-24', 'bootstrap', 1);
-  recovering = true;
   const conflict = { path: 'logs/2026-09-23.json', conflictContext: context };
+  recovering = true;
   assert.equal(await listener(conflict), false);
+  phase = 'overlay';
+  assert.equal(await listener(conflict), false);
+  assert.equal(recoveryWrites, 1);
+  phase = 'refused';
   assert.equal(await listener(conflict), true);
   assert.equal(recoveryWrites, 2);
 });
