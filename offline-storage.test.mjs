@@ -16,6 +16,7 @@ test('offline manifest is backed by the Mobius storage runtime', async () => {
   const calls = [];
   globalThis.window = {
     mobius: {
+      runtimeFeatures: { authoritativeVersionedReads: true },
       storage: {
         get: async (path) => values.get(path) ?? null,
         set: async (path, value) => {
@@ -49,6 +50,25 @@ test('offline manifest is backed by the Mobius storage runtime', async () => {
   }
 });
 
+test('older runtimes keep day writes on the non-CAS compatibility path', async (t) => {
+  const previousWindow = globalThis.window;
+  t.after(() => { globalThis.window = previousWindow; });
+  const calls = [];
+  globalThis.window = {
+    mobius: {
+      storage: {
+        onConflict() { throw new Error('legacy runtime must not install recovery'); },
+        async get() { calls.push('get'); return {}; },
+        async set() { calls.push('set'); return { queued: true }; },
+        async getWithVersion() { throw new Error('legacy runtime must not use versioned reads'); },
+        async durableWrite() { throw new Error('legacy runtime must not use conditional writes'); },
+      },
+    },
+  };
+  await setEntry('2026-09-25', 'walk', 1);
+  assert.deepEqual(calls, ['get', 'set']);
+});
+
 test('history keeps its prior view for an incomplete offline listing and refreshes when complete', async (t) => {
   const previousWindow = globalThis.window;
   t.after(() => { globalThis.window = previousWindow; });
@@ -60,6 +80,7 @@ test('history keeps its prior view for an incomplete offline listing and refresh
   };
   globalThis.window = {
     mobius: {
+      runtimeFeatures: { authoritativeVersionedReads: true },
       online: true,
       storage: {
         listWithStatus: async () => listing,
@@ -100,6 +121,7 @@ test('complete history membership remains unknown when any listed body is absent
   t.after(() => { globalThis.window = previousWindow; });
   globalThis.window = {
     mobius: {
+      runtimeFeatures: { authoritativeVersionedReads: true },
       online: false,
       storage: {
         listWithStatus: async () => ({
@@ -123,6 +145,7 @@ test('an offline day intent replays over a disjoint remote habit update exactly 
   const writes = [];
   globalThis.window = {
     mobius: {
+      runtimeFeatures: { authoritativeVersionedReads: true },
       storage: {
         onConflict(cb) { listener = cb; return () => { listener = null; }; },
         async getWithVersion() {
@@ -181,6 +204,7 @@ test('an ordered day-intent batch preserves multiple edits and a reversal', asyn
   };
   globalThis.window = {
     mobius: {
+      runtimeFeatures: { authoritativeVersionedReads: true },
       storage: {
         onConflict(cb) { listener = cb; return () => {}; },
         async getWithVersion() { return { value: { read: 1 }, version: 'remote-v2' }; },
@@ -219,19 +243,24 @@ test('a remounted recovery never treats its queued adjustment overlay as server 
     onConflict(cb) { listener = cb; return () => {}; },
     get: async () => null,
     async getWithVersion() {
-      if (phase === 'initial') return { value: { read: 1 }, version: 'remote-v1' };
-      return {
-        value: { read: 1, walk: 1000, _mobius: { applied: ['walk-plus'] } }, version: 'remote-v2',
-      };
+      if (phase !== 'confirmed') return { value: { read: 1 }, version: 'remote-v1' };
+      return { value: {
+        read: 1, walk: 1000, _mobius: { applied: ['walk-plus'] },
+      }, version: 'remote-v2' };
     },
-    pendingCount: async () => phase === 'queued' ? 1 : 0,
+    pendingCount: async () => { throw new Error('recovery must not race a separate queue count') },
     async durableWrite() {
       if (!recovering) return { durability: 'synced' };
       recoveryWrites += 1;
-      return { durability: recoveryWrites === 1 ? 'queued' : 'synced' };
+      return { durability: phase === 'confirmed' ? 'synced' : 'queued' };
     },
   });
-  globalThis.window = { mobius: { storage: storage() } };
+  globalThis.window = {
+    mobius: {
+      runtimeFeatures: { authoritativeVersionedReads: true },
+      storage: storage(),
+    },
+  };
 
   await setEntry('2026-09-24', 'bootstrap', 1);
   const conflict = { path: 'logs/2026-09-23.json', conflictContext: context };
@@ -243,8 +272,8 @@ test('a remounted recovery never treats its queued adjustment overlay as server 
   globalThis.window.mobius.storage = storage();
   await getDayLog('2026-09-23');
   assert.equal(await listener(conflict), false);
-  assert.equal(recoveryWrites, 1);
+  assert.equal(recoveryWrites, 2);
   phase = 'confirmed';
   assert.equal(await listener(conflict), true);
-  assert.equal(recoveryWrites, 1);
+  assert.equal(recoveryWrites, 2);
 });

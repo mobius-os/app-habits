@@ -66,7 +66,8 @@ function ensureDayConflictRecovery() {
   recoveryStorage = storage;
   detachRecovery = null;
   recoveredIntents = new Set();
-  if (!storage?.onConflict || !storage?.getWithVersion || !storage?.durableWrite) return;
+  if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads !== true
+      || !storage?.onConflict || !storage?.getWithVersion || !storage?.durableWrite) return;
   detachRecovery = storage.onConflict(async (conflict) => {
     const context = conflict?.conflictContext;
     const intents = conflictContexts(context);
@@ -76,11 +77,11 @@ function ensureDayConflictRecovery() {
         ))) return false;
     if (intents.every((intent) => recoveredIntents.has(intent.id))) return true;
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      // getWithVersion overlays every queued write, including a recovery
-      // started by a previous frame. Do not acknowledge a conflict while any
-      // write remains pending: its metadata is local, not server confirmation.
-      if (await storage.pendingCount?.() > 0) return false;
+      // Online versioned reads pair the authoritative server document with its
+      // ETag. Offline reads can contain a queued overlay and cannot confirm a
+      // recovery, even when that overlay already carries the intent id.
       const current = await storage.getWithVersion(conflict.path, 'json');
+      if (current?.offline === true) return false;
       const raw = current?.value || {};
       const applied = raw?.[DAY_META]?.applied || [];
       const remaining = intents.filter((intent) => (
@@ -203,7 +204,8 @@ async function writeDayIntent(dateStr, intent) {
   ensureDayConflictRecovery();
   const storage = window.mobius.storage;
   const path = logPath(dateStr);
-  if (storage.getWithVersion && storage.durableWrite && storage.onConflict) {
+  if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads === true
+      && storage.getWithVersion && storage.durableWrite && storage.onConflict) {
     const current = await storage.getWithVersion(path, 'json');
     const next = applyDayIntent(current?.value || {}, intent);
     await storage.durableWrite(path, next, {
