@@ -205,3 +205,35 @@ test('an ordered day-intent batch preserves multiple edits and a reversal', asyn
   );
   assert.deepEqual(writes[0].options.conflictContext, context);
 });
+test('a queued recovery remains eligible for a consecutive conflict', async (t) => {
+  const previousWindow = globalThis.window;
+  t.after(() => { globalThis.window = previousWindow; });
+  let listener;
+  let recovering = false;
+  let recoveryWrites = 0;
+  const context = {
+    kind: 'habits-day-entry', id: 'walk-on', habitId: 'walk', operation: 'set', value: 1,
+  };
+  globalThis.window = {
+    mobius: {
+      storage: {
+        onConflict(cb) { listener = cb; return () => {}; },
+        async getWithVersion() {
+          return { value: { read: 1 }, version: `remote-v${recoveryWrites + 2}` };
+        },
+        async durableWrite() {
+          if (!recovering) return { durability: 'synced' };
+          recoveryWrites += 1;
+          return { durability: recoveryWrites === 1 ? 'queued' : 'synced' };
+        },
+      },
+    },
+  };
+
+  await setEntry('2026-09-24', 'bootstrap', 1);
+  recovering = true;
+  const conflict = { path: 'logs/2026-09-23.json', conflictContext: context };
+  assert.equal(await listener(conflict), false);
+  assert.equal(await listener(conflict), true);
+  assert.equal(recoveryWrites, 2);
+});

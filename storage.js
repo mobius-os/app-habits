@@ -88,11 +88,16 @@ function ensureDayConflictRecovery() {
       }
       const merged = remaining.reduce(applyDayIntent, raw);
       try {
-        await storage.durableWrite(conflict.path, merged, {
+        const result = await storage.durableWrite(conflict.path, merged, {
           kind: 'json',
           ...(current?.version ? { ifMatch: current.version } : { ifNoneMatch: true }),
           conflictContext: context,
         });
+        // A queued recovery is durable but not yet accepted by the server. Do
+        // not consume the original conflict or mark its intents recovered;
+        // replay will either observe the accepted ids or retry after a second
+        // conflict on reconnect.
+        if (result?.durability !== 'synced') return false;
         for (const intent of intents) recoveredIntents.add(intent.id);
         return true;
       } catch (error) {
