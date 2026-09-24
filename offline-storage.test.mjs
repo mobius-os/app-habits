@@ -205,7 +205,7 @@ test('an ordered day-intent batch preserves multiple edits and a reversal', asyn
   );
   assert.deepEqual(writes[0].options.conflictContext, context);
 });
-test('a queued recovery never treats its pending adjustment overlay as server confirmation', async (t) => {
+test('a remounted recovery never treats its queued adjustment overlay as server confirmation', async (t) => {
   const previousWindow = globalThis.window;
   t.after(() => { globalThis.window = previousWindow; });
   let listener;
@@ -215,34 +215,36 @@ test('a queued recovery never treats its pending adjustment overlay as server co
   const context = {
     kind: 'habits-day-entry', id: 'walk-plus', habitId: 'walk', operation: 'adjust', deltaRaw: 1000,
   };
-  globalThis.window = {
-    mobius: {
-      storage: {
-        onConflict(cb) { listener = cb; return () => {}; },
-        async getWithVersion() {
-          if (phase === 'overlay') return {
-            value: { read: 1, walk: 1000, _mobius: { applied: ['walk-plus'] } }, version: 'remote-v2',
-          };
-          return { value: { read: 1 }, version: 'remote-v3' };
-        },
-        pendingCount: async () => phase === 'overlay' ? 1 : 0,
-        async durableWrite() {
-          if (!recovering) return { durability: 'synced' };
-          recoveryWrites += 1;
-          return { durability: recoveryWrites === 1 ? 'queued' : 'synced' };
-        },
-      },
+  const storage = () => ({
+    onConflict(cb) { listener = cb; return () => {}; },
+    get: async () => null,
+    async getWithVersion() {
+      if (phase === 'initial') return { value: { read: 1 }, version: 'remote-v1' };
+      return {
+        value: { read: 1, walk: 1000, _mobius: { applied: ['walk-plus'] } }, version: 'remote-v2',
+      };
     },
-  };
+    pendingCount: async () => phase === 'queued' ? 1 : 0,
+    async durableWrite() {
+      if (!recovering) return { durability: 'synced' };
+      recoveryWrites += 1;
+      return { durability: recoveryWrites === 1 ? 'queued' : 'synced' };
+    },
+  });
+  globalThis.window = { mobius: { storage: storage() } };
 
   await setEntry('2026-09-24', 'bootstrap', 1);
   const conflict = { path: 'logs/2026-09-23.json', conflictContext: context };
   recovering = true;
   assert.equal(await listener(conflict), false);
-  phase = 'overlay';
+  phase = 'queued';
+  // A new frame has no in-memory recovery state, but its queued overlay still
+  // cannot be used as proof that the server accepted the adjustment.
+  globalThis.window.mobius.storage = storage();
+  await getDayLog('2026-09-23');
   assert.equal(await listener(conflict), false);
   assert.equal(recoveryWrites, 1);
-  phase = 'refused';
+  phase = 'confirmed';
   assert.equal(await listener(conflict), true);
-  assert.equal(recoveryWrites, 2);
+  assert.equal(recoveryWrites, 1);
 });

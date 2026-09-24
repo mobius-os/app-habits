@@ -59,7 +59,6 @@ function applyDayIntent(raw, intent) {
 let recoveryStorage = null;
 let detachRecovery = null;
 let recoveredIntents = new Set();
-let pendingRecoveryAdjustments = new Set();
 function ensureDayConflictRecovery() {
   const storage = window.mobius?.storage;
   if (storage === recoveryStorage) return;
@@ -67,7 +66,6 @@ function ensureDayConflictRecovery() {
   recoveryStorage = storage;
   detachRecovery = null;
   recoveredIntents = new Set();
-  pendingRecoveryAdjustments = new Set();
   if (!storage?.onConflict || !storage?.getWithVersion || !storage?.durableWrite) return;
   detachRecovery = storage.onConflict(async (conflict) => {
     const context = conflict?.conflictContext;
@@ -78,21 +76,13 @@ function ensureDayConflictRecovery() {
         ))) return false;
     if (intents.every((intent) => recoveredIntents.has(intent.id))) return true;
     for (let attempt = 0; attempt < 4; attempt += 1) {
+      // getWithVersion overlays every queued write, including a recovery
+      // started by a previous frame. Do not acknowledge a conflict while any
+      // write remains pending: its metadata is local, not server confirmation.
+      if (await storage.pendingCount?.() > 0) return false;
       const current = await storage.getWithVersion(conflict.path, 'json');
       const raw = current?.value || {};
       const applied = raw?.[DAY_META]?.applied || [];
-      if (pendingRecoveryAdjustments.size && await storage.pendingCount?.() === 0) {
-        pendingRecoveryAdjustments.clear();
-      }
-      for (const id of pendingRecoveryAdjustments) {
-        if (!applied.includes(id)) pendingRecoveryAdjustments.delete(id);
-      }
-      // getWithVersion overlays queued writes. An adjustment id in that overlay
-      // cannot prove the server accepted it while that recovery is pending, so
-      // keep the original conflict open until the write has settled.
-      if (intents.some((intent) => (
-        pendingRecoveryAdjustments.has(intent.id) && applied.includes(intent.id)
-      ))) return false;
       const remaining = intents.filter((intent) => (
         !recoveredIntents.has(intent.id) && !applied.includes(intent.id)
       ));
@@ -111,12 +101,7 @@ function ensureDayConflictRecovery() {
         // not consume the original conflict or mark its intents recovered;
         // replay will either observe the accepted ids or retry after a second
         // conflict on reconnect.
-        if (result?.durability !== 'synced') {
-          for (const intent of remaining) {
-            if (intent.operation === 'adjust') pendingRecoveryAdjustments.add(intent.id);
-          }
-          return false;
-        }
+        if (result?.durability !== 'synced') return false;
         for (const intent of intents) recoveredIntents.add(intent.id);
         return true;
       } catch (error) {
