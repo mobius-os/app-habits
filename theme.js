@@ -38,7 +38,7 @@ export const CSS = `
 
 /* tabs */
 .hb-tabs { flex: 0 0 auto; display: flex; gap: 4px; margin: 2px 16px 8px; padding: 4px;
-  background: var(--surface2, var(--surface)); border-radius: 12px; }
+  background: var(--surface-2, var(--surface)); border-radius: 12px; }
 .hb-tab { flex: 1; min-height: 44px; border: none; background: transparent; color: var(--muted);
   font-family: var(--font); font-size: 14px; font-weight: 700; border-radius: 9px; cursor: pointer;
   transition: background .15s ease, color .15s ease; }
@@ -113,7 +113,7 @@ export const CSS = `
 .hb-meas-unit { font-size: 11px; font-weight: 650; color: var(--muted); }
 .hb-meas-btns { display: flex; gap: 4px; margin-top: 4px; }
 .hb-step { min-width: 44px; width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--border);
-  background: var(--surface2, var(--surface)); color: var(--text); font-size: 17px; font-weight: 800;
+  background: var(--surface-2, var(--surface)); color: var(--text); font-size: 17px; font-weight: 800;
   cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .hb-step:active { transform: scale(0.9); }
 
@@ -127,7 +127,7 @@ export const CSS = `
 .hb-timer-reset { border: none; background: none; padding: 2px 0; font-size: 11px; font-weight: 650;
   color: var(--muted); text-decoration: underline; cursor: pointer; min-height: 20px; }
 .hb-timer-play { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--surface2, var(--surface)); color: var(--hb-accent); font-size: 15px;
+  background: var(--surface-2, var(--surface)); color: var(--hb-accent); font-size: 15px;
   display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .hb-timer-play.is-running { background: var(--hb-accent); border-color: var(--hb-accent); color: var(--accent-fg); }
 .hb-timer-play:active { transform: scale(0.9); }
@@ -266,7 +266,7 @@ export const CSS = `
 /* heatmap */
 .hb-heat { display: flex; gap: 3px; overflow-x: auto; padding-bottom: 4px; }
 .hb-heat-col { display: flex; flex-direction: column; gap: 3px; }
-.hb-heat-cell { position: relative; width: 14px; height: 14px; border-radius: 4px; background: var(--surface2, var(--border));
+.hb-heat-cell { position: relative; width: 14px; height: 14px; border-radius: 4px; background: var(--surface-2, var(--border));
   cursor: pointer; }
 .hb-heat-cell::before { content: ""; position: absolute; inset: -15px; }
 .hb-heat-cell.is-future { visibility: hidden; pointer-events: none; }
