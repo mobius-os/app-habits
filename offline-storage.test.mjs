@@ -277,3 +277,107 @@ test('a remounted recovery never treats its queued adjustment overlay as server 
   assert.equal(await listener(conflict), true);
   assert.equal(recoveryWrites, 2);
 });
+
+test('history reload reads only day files whose modified_at or size changed', async (t) => {
+  const previousWindow = globalThis.window;
+  t.after(() => { globalThis.window = previousWindow; });
+  const days = new Map([
+    ['logs/2030-01-01.json', { stamp: 't1', log: { walk: 1 } }],
+    ['logs/2030-01-02.json', { stamp: 't1', log: { read: 1 } }],
+  ]);
+  const gets = [];
+  globalThis.window = {
+    mobius: {
+      online: true,
+      storage: {
+        listWithStatus: async () => ({
+          complete: true,
+          source: 'server',
+          entries: [...days].map(([path, day]) => ({
+            name: path.slice(5), path, type: 'file', modified_at: day.stamp, size: 12,
+          })),
+        }),
+        get: async (path) => { gets.push(path); return days.get(path)?.log ?? null; },
+        set: async (path, value) => {
+          days.set(path, { stamp: 'local', log: value });
+          return { queued: false };
+        },
+      },
+    },
+  };
+
+  await loadAllLogs();
+  assert.deepEqual(gets.sort(), ['logs/2030-01-01.json', 'logs/2030-01-02.json']);
+
+  gets.length = 0;
+  days.set('logs/2030-01-02.json', { stamp: 't2', log: { read: 2 } });
+  assert.deepEqual(await loadAllLogs(), { '2030-01-01': { walk: 1 }, '2030-01-02': { read: 2 } });
+  assert.deepEqual(gets, ['logs/2030-01-02.json']);
+
+  gets.length = 0;
+  await setEntry('2030-01-01', 'walk', 3);
+  // The server stamp has not moved yet (e.g. the write is still queued).
+  days.set('logs/2030-01-01.json', { stamp: 't1', log: { walk: 3 } });
+  gets.length = 0;
+  assert.deepEqual((await loadAllLogs())['2030-01-01'], { walk: 3 });
+  assert.deepEqual(gets, ['logs/2030-01-01.json'], 'a day written here is never served from the listing cache');
+});
+
+test('history uses day bodies inlined by an includeContent listing', async (t) => {
+  const previousWindow = globalThis.window;
+  t.after(() => { globalThis.window = previousWindow; });
+  globalThis.window = {
+    mobius: {
+      online: true,
+      storage: {
+        listWithStatus: async (_prefix, options) => ({
+          complete: true,
+          source: 'server',
+          entries: [{
+            name: '2030-02-01.json', path: 'logs/2030-02-01.json', type: 'file',
+            ...(options?.includeContent ? { content: { walk: 5, _mobius: { version: 1, applied: [] } } } : {}),
+          }],
+        }),
+        get: async () => { throw new Error('inline bodies must not be read again'); },
+      },
+    },
+  };
+  assert.deepEqual(await loadAllLogs(), { '2030-02-01': { walk: 5 } });
+});
+
+test('a history reload that overlaps a day write does not cache what it read', async (t) => {
+  const previousWindow = globalThis.window;
+  t.after(() => { globalThis.window = previousWindow; });
+  const path = 'logs/2030-03-01.json';
+  const days = new Map([[path, { walk: 1 }]]);
+  const gets = [];
+  let duringRead = null;
+  globalThis.window = {
+    mobius: {
+      online: true,
+      storage: {
+        // The server stamp stays the same, as it does while the write is queued.
+        listWithStatus: async () => ({
+          complete: true,
+          source: 'server',
+          entries: [{ name: '2030-03-01.json', path, type: 'file', modified_at: 't1', size: 12 }],
+        }),
+        get: async (p) => {
+          gets.push(p);
+          const value = days.get(p) ?? null;
+          const hook = duringRead;
+          duringRead = null;
+          if (hook) await hook();
+          return value;
+        },
+        set: async (p, value) => { days.set(p, value); return { queued: true }; },
+      },
+    },
+  };
+
+  duringRead = () => setEntry('2030-03-01', 'walk', 4);
+  await loadAllLogs();
+  gets.length = 0;
+  assert.deepEqual((await loadAllLogs())['2030-03-01'], { walk: 4 });
+  assert.deepEqual(gets, [path], 'the overlapping reload did not cache the pre-write day');
+});

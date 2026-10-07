@@ -69,6 +69,7 @@ function ensureDayConflictRecovery() {
   if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads !== true
       || !storage?.onConflict || !storage?.getWithVersion || !storage?.durableWrite) return;
   detachRecovery = storage.onConflict(async (conflict) => {
+    forgetListedLog(String(conflict?.path || ''));
     const context = conflict?.conflictContext;
     const intents = conflictContexts(context);
     if (!/^logs\/\d{4}-\d{2}-\d{2}\.json$/.test(String(conflict?.path || ''))
@@ -204,6 +205,7 @@ async function writeDayIntent(dateStr, intent) {
   ensureDayConflictRecovery();
   const storage = window.mobius.storage;
   const path = logPath(dateStr);
+  forgetListedLog(path);
   if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads === true
       && storage.getWithVersion && storage.durableWrite && storage.onConflict) {
     const current = await storage.getWithVersion(path, 'json');
@@ -318,30 +320,75 @@ export function clearTimerState(habitId) {
 
 // --- history (analytics screens) ---
 
+// History is reloaded on every open and every return to the app, and a year of
+// use is 365 day files. Bodies therefore come, in order, from the listing
+// itself (runtimes with `includeContent` inline small JSON files, queued local
+// writes overlaid), from `listedLogs` when the file's modified_at + size are
+// unchanged since this page last read it, or from a bounded batch of GETs.
+// Any local write or conflict on a day drops its entry, because a queued or
+// refused write can differ from the server body under the same server stamp,
+// and a reload that overlapped such a change does not refill the cache.
+const LOG_READ_BATCH_SIZE = 8;
+const listedLogs = new Map(); // path -> { stamp, raw }
+let localLogChanges = 0;
+
+function forgetListedLog(path) {
+  localLogChanges += 1;
+  listedLogs.delete(path);
+}
+
+function listedStamp(entry) {
+  return entry.modified_at && Number.isFinite(entry.size)
+    ? `${entry.modified_at}|${entry.size}`
+    : null;
+}
+
 // Enumerate every day-log and read it into { 'YYYY-MM-DD': { habitId: value } }.
 export async function loadAllLogs() {
   const storage = window.mobius.storage;
   ensureDayConflictRecovery();
+  const changesAtStart = localLogChanges;
   const listing = typeof storage.listWithStatus === 'function'
-    ? await storage.listWithStatus('logs/')
+    ? await storage.listWithStatus('logs/', { includeContent: true })
     : { entries: await storage.list('logs/'), complete: window.mobius?.online !== false };
   // A partial history is useful internally but unsafe as the authoritative
   // analytics/purge input. Keep the previous in-memory view until a complete
   // server or last-known snapshot is available.
   if (!listing || listing.complete !== true) return null;
-  const entries = listing.entries || [];
+  const files = (listing.entries || [])
+    .filter((e) => e.type === 'file' && e.name.endsWith('.json'));
+  const bodies = new Map(); // path -> raw day log, or null when unreadable
+  const toFetch = [];
+  for (const entry of files) {
+    const stamp = listedStamp(entry);
+    const cached = stamp && listedLogs.get(entry.path);
+    if (Object.prototype.hasOwnProperty.call(entry, 'content') && entry.content != null) {
+      bodies.set(entry.path, entry.content);
+    } else if (cached && cached.stamp === stamp) {
+      bodies.set(entry.path, cached.raw);
+    } else {
+      toFetch.push(entry);
+    }
+  }
+  for (let i = 0; i < toFetch.length; i += LOG_READ_BATCH_SIZE) {
+    await Promise.all(toFetch.slice(i, i + LOG_READ_BATCH_SIZE).map(async (entry) => {
+      bodies.set(entry.path, await storage.get(entry.path));
+    }));
+  }
   const out = {};
   let bodiesComplete = true;
-  await Promise.all(
-    entries
-      .filter((e) => e.type === 'file' && e.name.endsWith('.json'))
-      .map(async (e) => {
-        const dateStr = e.name.replace(/\.json$/, '');
-        const log = await window.mobius.storage.get(e.path);
-        if (log && typeof log === 'object') out[dateStr] = publicDayLog(log);
-        else bodiesComplete = false;
-      }),
-  );
+  listedLogs.clear();
+  const cacheable = localLogChanges === changesAtStart;
+  for (const entry of files) {
+    const raw = bodies.get(entry.path);
+    if (!raw || typeof raw !== 'object') {
+      bodiesComplete = false;
+      continue;
+    }
+    const stamp = listedStamp(entry);
+    if (stamp && cacheable) listedLogs.set(entry.path, { stamp, raw });
+    out[entry.name.replace(/\.json$/, '')] = publicDayLog(raw);
+  }
   return bodiesComplete ? out : null;
 }
 
