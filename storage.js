@@ -68,8 +68,7 @@ function ensureDayConflictRecovery() {
   recoveredIntents = new Set();
   if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads !== true
       || !storage?.onConflict || !storage?.getWithVersion || !storage?.durableWrite) return;
-  detachRecovery = storage.onConflict(async (conflict) => {
-    forgetListedLog(String(conflict?.path || ''));
+  detachRecovery = storage.onConflict((conflict) => changingDayLog(String(conflict?.path || ''), async () => {
     const context = conflict?.conflictContext;
     const intents = conflictContexts(context);
     if (!/^logs\/\d{4}-\d{2}-\d{2}\.json$/.test(String(conflict?.path || ''))
@@ -111,7 +110,7 @@ function ensureDayConflictRecovery() {
       }
     }
     return false;
-  });
+  }));
 }
 
 // Local-calendar date string (the user's "today"); domain treats date strings as
@@ -203,9 +202,12 @@ export function adjustEntry(dateStr, habitId, deltaRaw, floor = 0) {
 
 async function writeDayIntent(dateStr, intent) {
   ensureDayConflictRecovery();
-  const storage = window.mobius.storage;
   const path = logPath(dateStr);
-  forgetListedLog(path);
+  return changingDayLog(path, () => writeDayIntentNow(path, intent));
+}
+
+async function writeDayIntentNow(path, intent) {
+  const storage = window.mobius.storage;
   if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads === true
       && storage.getWithVersion && storage.durableWrite && storage.onConflict) {
     const current = await storage.getWithVersion(path, 'json');
@@ -335,6 +337,19 @@ let localLogChanges = 0;
 function forgetListedLog(path) {
   localLogChanges += 1;
   listedLogs.delete(path);
+}
+
+// A local change to a day spans its read, its write, and the runtime taking
+// the write. Forgetting the day at both ends means a reload that overlaps
+// either end does not cache what it read, and one that ran entirely inside
+// the change is dropped when the change settles.
+async function changingDayLog(path, change) {
+  forgetListedLog(path);
+  try {
+    return await change();
+  } finally {
+    forgetListedLog(path);
+  }
 }
 
 function listedStamp(entry) {

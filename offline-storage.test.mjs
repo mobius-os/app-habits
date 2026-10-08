@@ -381,3 +381,107 @@ test('a history reload that overlaps a day write does not cache what it read', a
   assert.deepEqual((await loadAllLogs())['2030-03-01'], { walk: 4 });
   assert.deepEqual(gets, [path], 'the overlapping reload did not cache the pre-write day');
 });
+
+// A day whose write is held open while history reloads. The listing never
+// carries content and its server stamp never moves, as while a write is queued.
+let heldWriteModule = 0;
+async function heldDayWrite(t, { versioned }) {
+  const previousWindow = globalThis.window;
+  t.after(() => { globalThis.window = previousWindow; });
+  // A fresh module per case, so no earlier history cache or listener leaks in.
+  const api = await import(`./storage.js?held-write=${++heldWriteModule}`);
+  const date = '2030-05-01';
+  const path = `logs/${date}.json`;
+  let day = { walk: 1 };
+  let releaseWrite;
+  const writeHeld = new Promise((resolve) => { releaseWrite = resolve; });
+  let writeStarted;
+  const started = new Promise((resolve) => { writeStarted = resolve; });
+  let conflictListener = null;
+  const gets = [];
+  const commit = async (value) => {
+    writeStarted();
+    await writeHeld;
+    day = structuredClone(value);
+  };
+  globalThis.window = {
+    mobius: {
+      online: true,
+      runtimeFeatures: { authoritativeVersionedReads: versioned },
+      storage: {
+        listWithStatus: async () => ({
+          complete: true,
+          source: 'server',
+          entries: [{ name: `${date}.json`, path, type: 'file', modified_at: 't1', size: 12 }],
+        }),
+        get: async (p) => {
+          if (p !== path) return null;
+          gets.push(p);
+          return structuredClone(day);
+        },
+        set: async (p, value) => {
+          if (p === path) await commit(value);
+          return { queued: true };
+        },
+        getWithVersion: async () => ({ value: structuredClone(day), version: 'v1' }),
+        durableWrite: async (_p, value) => { await commit(value); return { durability: 'queued' }; },
+        onConflict: (listener) => { conflictListener = listener; return () => {}; },
+        subscribe: () => () => {},
+      },
+    },
+  };
+  return { api, date, path, gets, started, releaseWrite, conflict: () => conflictListener };
+}
+
+for (const versioned of [false, true]) {
+  test(`history reloaded during a pending day write shows the written day afterwards (${versioned ? 'versioned' : 'legacy'})`, async (t) => {
+    const f = await heldDayWrite(t, { versioned });
+    const write = f.api.setEntry(f.date, 'walk', 4);
+    await f.started;
+    assert.deepEqual((await f.api.loadAllLogs())[f.date], { walk: 1 });
+    f.releaseWrite();
+    await write;
+
+    f.gets.length = 0;
+    assert.deepEqual((await f.api.loadAllLogs())[f.date], { walk: 4 });
+    assert.deepEqual(f.gets, [f.path], 'the pre-write body read during the write is not reused');
+    f.gets.length = 0;
+    await f.api.loadAllLogs();
+    assert.deepEqual(f.gets, [], 'a settled day is cached again');
+  });
+}
+
+test('history reloaded during a conflict recovery write shows the recovered day afterwards', async (t) => {
+  const f = await heldDayWrite(t, { versioned: true });
+  await f.api.loadAllLogs(); // registers conflict recovery and caches the day
+  const recovery = f.conflict()({
+    path: f.path,
+    conflictContext: { kind: 'habits-day-entry', id: 'recover-1', habitId: 'walk', operation: 'set', value: 4 },
+  });
+  await f.started;
+  assert.deepEqual((await f.api.loadAllLogs())[f.date], { walk: 1 });
+  f.releaseWrite();
+  await recovery;
+
+  f.gets.length = 0;
+  assert.deepEqual((await f.api.loadAllLogs())[f.date], { walk: 4 });
+  assert.deepEqual(f.gets, [f.path]);
+});
+
+test('deleting a habit purges it from a day written while history was reloading', async (t) => {
+  const f = await heldDayWrite(t, { versioned: false });
+  const write = f.api.setEntry(f.date, 'read', 2);
+  await f.started;
+  await f.api.loadAllLogs(); // reads { walk: 1 } while the write is pending
+  f.releaseWrite();
+  await write;
+
+  const purged = [];
+  const set = globalThis.window.mobius.storage.set;
+  globalThis.window.mobius.storage.set = async (p, value) => {
+    if (p.startsWith('logs/')) purged.push(p);
+    return set(p, value);
+  };
+  await f.api.purgeHabit('read');
+  assert.deepEqual(purged, [f.path], 'the purge saw the day that now holds the habit');
+});
