@@ -68,51 +68,50 @@ function ensureDayConflictRecovery() {
   recoveredIntents = new Set();
   if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads !== true
       || !storage?.onConflict || !storage?.getWithVersion || !storage?.durableWrite) return;
-  detachRecovery = storage.onConflict((conflict) => withLogInvalidation(
-    String(conflict?.path || ''), async () => {
-      const context = conflict?.conflictContext;
-      const intents = conflictContexts(context);
-      if (!/^logs\/\d{4}-\d{2}-\d{2}\.json$/.test(String(conflict?.path || ''))
-          || !intents.length || intents.some((intent) => (
-            intent?.kind !== 'habits-day-entry' || !intent.id || !intent.habitId
-          ))) return false;
-      if (intents.every((intent) => recoveredIntents.has(intent.id))) return true;
-      for (let attempt = 0; attempt < 4; attempt += 1) {
-        // Online versioned reads pair the authoritative server document with its
-        // ETag. Offline reads can contain a queued overlay and cannot confirm a
-        // recovery, even when that overlay already carries the intent id.
-        const current = await storage.getWithVersion(conflict.path, 'json');
-        if (current?.offline === true) return false;
-        const raw = current?.value || {};
-        const applied = raw?.[DAY_META]?.applied || [];
-        const remaining = intents.filter((intent) => (
-          !recoveredIntents.has(intent.id) && !applied.includes(intent.id)
-        ));
-        if (!remaining.length) {
-          for (const intent of intents) recoveredIntents.add(intent.id);
-          return true;
-        }
-        const merged = remaining.reduce(applyDayIntent, raw);
-        try {
-          const result = await storage.durableWrite(conflict.path, merged, {
-            kind: 'json',
-            ...(current?.version ? { ifMatch: current.version } : { ifNoneMatch: true }),
-            conflictContext: context,
-          });
-          // A queued recovery is durable but not yet accepted by the server. Do
-          // not consume the original conflict or mark its intents recovered;
-          // replay will either observe the accepted ids or retry after a second
-          // conflict on reconnect.
-          if (result?.durability !== 'synced') return false;
-          for (const intent of intents) recoveredIntents.add(intent.id);
-          return true;
-        } catch (error) {
-          if (error?.code !== 'conflict') throw error;
-        }
+  detachRecovery = storage.onConflict(async (conflict) => {
+    forgetListedLog(String(conflict?.path || ''));
+    const context = conflict?.conflictContext;
+    const intents = conflictContexts(context);
+    if (!/^logs\/\d{4}-\d{2}-\d{2}\.json$/.test(String(conflict?.path || ''))
+        || !intents.length || intents.some((intent) => (
+          intent?.kind !== 'habits-day-entry' || !intent.id || !intent.habitId
+        ))) return false;
+    if (intents.every((intent) => recoveredIntents.has(intent.id))) return true;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      // Online versioned reads pair the authoritative server document with its
+      // ETag. Offline reads can contain a queued overlay and cannot confirm a
+      // recovery, even when that overlay already carries the intent id.
+      const current = await storage.getWithVersion(conflict.path, 'json');
+      if (current?.offline === true) return false;
+      const raw = current?.value || {};
+      const applied = raw?.[DAY_META]?.applied || [];
+      const remaining = intents.filter((intent) => (
+        !recoveredIntents.has(intent.id) && !applied.includes(intent.id)
+      ));
+      if (!remaining.length) {
+        for (const intent of intents) recoveredIntents.add(intent.id);
+        return true;
       }
-      return false;
-    },
-  ));
+      const merged = remaining.reduce(applyDayIntent, raw);
+      try {
+        const result = await storage.durableWrite(conflict.path, merged, {
+          kind: 'json',
+          ...(current?.version ? { ifMatch: current.version } : { ifNoneMatch: true }),
+          conflictContext: context,
+        });
+        // A queued recovery is durable but not yet accepted by the server. Do
+        // not consume the original conflict or mark its intents recovered;
+        // replay will either observe the accepted ids or retry after a second
+        // conflict on reconnect.
+        if (result?.durability !== 'synced') return false;
+        for (const intent of intents) recoveredIntents.add(intent.id);
+        return true;
+      } catch (error) {
+        if (error?.code !== 'conflict') throw error;
+      }
+    }
+    return false;
+  });
 }
 
 // Local-calendar date string (the user's "today"); domain treats date strings as
@@ -206,23 +205,22 @@ async function writeDayIntent(dateStr, intent) {
   ensureDayConflictRecovery();
   const storage = window.mobius.storage;
   const path = logPath(dateStr);
-  return withLogInvalidation(path, async () => {
-    if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads === true
-        && storage.getWithVersion && storage.durableWrite && storage.onConflict) {
-      const current = await storage.getWithVersion(path, 'json');
-      const next = applyDayIntent(current?.value || {}, intent);
-      await storage.durableWrite(path, next, {
-        kind: 'json',
-        ...(current?.version ? { ifMatch: current.version } : { ifNoneMatch: true }),
-        conflictContext: intent,
-      });
-      return publicDayLog(next);
-    }
-    const current = (await storage.get(path)) || {};
-    const next = applyDayIntent(current, intent);
-    await storage.set(path, next);
+  forgetListedLog(path);
+  if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads === true
+      && storage.getWithVersion && storage.durableWrite && storage.onConflict) {
+    const current = await storage.getWithVersion(path, 'json');
+    const next = applyDayIntent(current?.value || {}, intent);
+    await storage.durableWrite(path, next, {
+      kind: 'json',
+      ...(current?.version ? { ifMatch: current.version } : { ifNoneMatch: true }),
+      conflictContext: intent,
+    });
     return publicDayLog(next);
-  });
+  }
+  const current = (await storage.get(path)) || {};
+  const next = applyDayIntent(current, intent);
+  await storage.set(path, next);
+  return publicDayLog(next);
 }
 
 // Scrub a habit's id from every day-log when the habit is deleted, so its
@@ -337,18 +335,6 @@ let localLogChanges = 0;
 function forgetListedLog(path) {
   localLogChanges += 1;
   listedLogs.delete(path);
-}
-
-// A reload can start after the initial invalidation and finish while the
-// mutation is still awaiting its read/write. Drop that pre-settlement body
-// again on every exit, including refusals and queued conflict recoveries.
-async function withLogInvalidation(path, mutate) {
-  forgetListedLog(path);
-  try {
-    return await mutate();
-  } finally {
-    forgetListedLog(path);
-  }
 }
 
 function listedStamp(entry) {
