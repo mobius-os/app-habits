@@ -381,3 +381,150 @@ test('a history reload that overlaps a day write does not cache what it read', a
   assert.deepEqual((await loadAllLogs())['2030-03-01'], { walk: 4 });
   assert.deepEqual(gets, [path], 'the overlapping reload did not cache the pre-write day');
 });
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+// Fresh modules keep each race independent of any earlier history cache or
+// conflict listener. No wall-clock delays, real storage, or network are needed.
+let raceModule = 0;
+async function historyRace(t, { versioned, phase = 'write', rejected = false }) {
+  const previousWindow = globalThis.window;
+  t.after(() => { globalThis.window = previousWindow; });
+  const api = await import(`./storage.js?history-race=${++raceModule}`);
+  const date = '2030-04-01';
+  const path = `logs/${date}.json`;
+  const entered = deferred();
+  const release = deferred();
+  t.after(() => release.resolve());
+  const error = new Error('mock write refused');
+  let log = { walk: 1 };
+  let listener;
+  let holdRead = phase === 'read';
+  const gets = [];
+  const read = async () => {
+    const value = structuredClone(log);
+    if (holdRead) {
+      holdRead = false;
+      entered.resolve();
+      await release.promise;
+    }
+    return value;
+  };
+  const write = async (value) => {
+    if (phase === 'write') {
+      entered.resolve();
+      await release.promise;
+    }
+    // A refusal can expose the winner after a provisional overlay is removed.
+    log = rejected ? { walk: 9 } : structuredClone(value);
+    if (rejected) throw error;
+  };
+  const storage = {
+    listWithStatus: async () => ({
+      complete: true, source: 'server',
+      // Deliberately no inline content; queued writes leave these unchanged.
+      entries: [{ name: `${date}.json`, path, type: 'file', modified_at: 'server-t1', size: 10 }],
+    }),
+    get: async (p) => { gets.push(p); return read(); },
+    set: async (_p, value) => { await write(value); return { queued: true }; },
+    subscribe() { return () => {}; },
+    onConflict(cb) { listener = cb; return () => {}; },
+    getWithVersion: async () => ({ value: await read(), version: 'server-v1' }),
+    durableWrite: async (_p, value) => { await write(value); return { durability: 'queued' }; },
+  };
+  globalThis.window = { mobius: {
+    online: true, storage,
+    runtimeFeatures: { authoritativeVersionedReads: versioned },
+  } };
+  return { api, date, path, storage, entered, release, gets, error,
+    listener: () => listener, expected: rejected ? 9 : 4 };
+}
+
+for (const versioned of [false, true]) {
+  for (const rejected of [false, true]) {
+    for (const order of ['mutation-first', 'reload-first']) {
+      test(`history invalidates on ${rejected ? 'refused' : 'queued'} write settlement (${versioned ? 'CAS' : 'legacy'}, ${order})`, async (t) => {
+        const f = await historyRace(t, { versioned, rejected });
+        let readEntered;
+        let readRelease;
+        if (order === 'reload-first') {
+          readEntered = deferred();
+          readRelease = deferred();
+          t.after(() => readRelease.resolve());
+          const get = f.storage.get;
+          let first = true;
+          f.storage.get = async (p) => {
+            const value = await get(p);
+            if (first) {
+              first = false;
+              readEntered.resolve();
+              await readRelease.promise;
+            }
+            return value;
+          };
+        }
+        const reload = order === 'reload-first' ? f.api.loadAllLogs() : null;
+        if (readEntered) await readEntered.promise;
+        const settled = f.api.setEntry(f.date, 'walk', 4).then(
+          (value) => ({ value }), (error) => ({ error }),
+        );
+        await f.entered.promise;
+        let during;
+        if (reload) {
+          readRelease.resolve();
+          during = await reload;
+        } else during = await f.api.loadAllLogs();
+        // Complete the reload while the write is still pending, then settle it.
+        f.release.resolve();
+        const result = await settled;
+        assert.deepEqual(during[f.date], { walk: 1 });
+        if (rejected) assert.equal(result.error, f.error);
+        else assert.deepEqual(result.value, { walk: 4 });
+        f.gets.length = 0;
+        assert.deepEqual((await f.api.loadAllLogs())[f.date], { walk: f.expected });
+        assert.deepEqual(f.gets, [f.path], 'unchanged stamps cannot retain a pre-settlement body');
+        f.gets.length = 0;
+        await f.api.loadAllLogs();
+        assert.deepEqual(f.gets, [], 'settled unchanged history still benefits from caching');
+      });
+    }
+  }
+
+  test(`history invalidation spans the asynchronous day read (${versioned ? 'CAS' : 'legacy'})`, async (t) => {
+    const f = await historyRace(t, { versioned, phase: 'read' });
+    const write = f.api.setEntry(f.date, 'walk', 4);
+    await f.entered.promise;
+    const during = await f.api.loadAllLogs();
+    f.release.resolve();
+    await write;
+    assert.deepEqual(during[f.date], { walk: 1 });
+    assert.deepEqual((await f.api.loadAllLogs())[f.date], { walk: 4 });
+  });
+}
+
+for (const rejected of [false, true]) {
+  for (const phase of ['read', 'write']) {
+    test(`async recovery invalidates history on ${rejected ? 'failure' : 'queued settlement'} (${phase} suspended)`, async (t) => {
+      const f = await historyRace(t, { versioned: true, phase, rejected });
+      // Register recovery without changing the log or consuming its first read.
+      f.api.subscribeDayLog(f.date, () => {});
+      const settled = f.listener()({ path: f.path, conflictContext: {
+        kind: 'habits-day-entry', id: 'recovery-set', habitId: 'walk', operation: 'set', value: 4,
+      } }).then((value) => ({ value }), (error) => ({ error }));
+      await f.entered.promise;
+      const during = await f.api.loadAllLogs();
+      f.release.resolve();
+      const result = await settled;
+      assert.deepEqual(during[f.date], { walk: 1 });
+      if (rejected) assert.equal(result.error, f.error);
+      else assert.equal(result.value, false, 'queued recovery is not server acceptance');
+      f.gets.length = 0;
+      assert.deepEqual((await f.api.loadAllLogs())[f.date], { walk: f.expected });
+      assert.deepEqual(f.gets, [f.path]);
+    });
+  }
+}
