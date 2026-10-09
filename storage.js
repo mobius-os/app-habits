@@ -318,6 +318,11 @@ export function clearTimerState(habitId) {
 
 // --- history (analytics screens) ---
 
+// Read each day through the runtime after enumeration, in bounded batches.
+// Inline listing bodies can predate a write completed during the listing,
+// even when the runtime has already protected/reconciled its current mirror.
+const LOG_READ_BATCH_SIZE = 8;
+
 // Enumerate every day-log and read it into { 'YYYY-MM-DD': { habitId: value } }.
 export async function loadAllLogs() {
   const storage = window.mobius.storage;
@@ -329,19 +334,20 @@ export async function loadAllLogs() {
   // analytics/purge input. Keep the previous in-memory view until a complete
   // server or last-known snapshot is available.
   if (!listing || listing.complete !== true) return null;
-  const entries = listing.entries || [];
+  const files = (listing.entries || [])
+    .filter((e) => e.type === 'file' && e.name.endsWith('.json'));
   const out = {};
   let bodiesComplete = true;
-  await Promise.all(
-    entries
-      .filter((e) => e.type === 'file' && e.name.endsWith('.json'))
-      .map(async (e) => {
-        const dateStr = e.name.replace(/\.json$/, '');
-        const log = await window.mobius.storage.get(e.path);
-        if (log && typeof log === 'object') out[dateStr] = publicDayLog(log);
-        else bodiesComplete = false;
-      }),
-  );
+  for (let i = 0; i < files.length; i += LOG_READ_BATCH_SIZE) {
+    await Promise.all(files.slice(i, i + LOG_READ_BATCH_SIZE).map(async (entry) => {
+      const raw = await storage.get(entry.path);
+      if (!raw || typeof raw !== 'object') {
+        bodiesComplete = false;
+        return;
+      }
+      out[entry.name.replace(/\.json$/, '')] = publicDayLog(raw);
+    }));
+  }
   return bodiesComplete ? out : null;
 }
 
