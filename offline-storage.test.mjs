@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import test from 'node:test';
 
 import { adjustEntry, getDayLog, loadAllLogs, loadHabits, saveHabits, setEntry } from './storage.js';
@@ -278,7 +280,7 @@ test('a remounted recovery never treats its queued adjustment overlay as server 
   assert.equal(recoveryWrites, 2);
 });
 
-test('history reload reads only day files whose modified_at or size changed', async (t) => {
+test('metadata-only history reloads follow runtime bodies even under unchanged server stamps', async (t) => {
   const previousWindow = globalThis.window;
   t.after(() => { globalThis.window = previousWindow; });
   const days = new Map([
@@ -312,7 +314,7 @@ test('history reload reads only day files whose modified_at or size changed', as
   gets.length = 0;
   days.set('logs/2030-01-02.json', { stamp: 't2', log: { read: 2 } });
   assert.deepEqual(await loadAllLogs(), { '2030-01-01': { walk: 1 }, '2030-01-02': { read: 2 } });
-  assert.deepEqual(gets, ['logs/2030-01-02.json']);
+  assert.deepEqual(gets.sort(), ['logs/2030-01-01.json', 'logs/2030-01-02.json']);
 
   gets.length = 0;
   await setEntry('2030-01-01', 'walk', 3);
@@ -320,7 +322,13 @@ test('history reload reads only day files whose modified_at or size changed', as
   days.set('logs/2030-01-01.json', { stamp: 't1', log: { walk: 3 } });
   gets.length = 0;
   assert.deepEqual((await loadAllLogs())['2030-01-01'], { walk: 3 });
-  assert.deepEqual(gets, ['logs/2030-01-01.json'], 'a day written here is never served from the listing cache');
+  assert.deepEqual(gets.sort(), ['logs/2030-01-01.json', 'logs/2030-01-02.json']);
+
+  // Reconciliation/SWR can replace a body without any app write or stamp change.
+  days.set('logs/2030-01-01.json', { stamp: 't1', log: { walk: 1 } });
+  gets.length = 0;
+  assert.deepEqual((await loadAllLogs())['2030-01-01'], { walk: 1 });
+  assert.deepEqual(gets.sort(), ['logs/2030-01-01.json', 'logs/2030-01-02.json']);
 });
 
 test('history uses day bodies inlined by an includeContent listing', async (t) => {
@@ -345,7 +353,7 @@ test('history uses day bodies inlined by an includeContent listing', async (t) =
   assert.deepEqual(await loadAllLogs(), { '2030-02-01': { walk: 5 } });
 });
 
-test('a history reload that overlaps a day write does not cache what it read', async (t) => {
+test('a history reload after an overlapping day write reads the new body', async (t) => {
   const previousWindow = globalThis.window;
   t.after(() => { globalThis.window = previousWindow; });
   const path = 'logs/2030-03-01.json';
@@ -388,7 +396,7 @@ let heldWriteModule = 0;
 async function heldDayWrite(t, { versioned }) {
   const previousWindow = globalThis.window;
   t.after(() => { globalThis.window = previousWindow; });
-  // A fresh module per case, so no earlier history cache or listener leaks in.
+  // A fresh module per case, so no earlier write queue or listener leaks in.
   const api = await import(`./storage.js?held-write=${++heldWriteModule}`);
   const date = '2030-05-01';
   const path = `logs/${date}.json`;
@@ -447,13 +455,13 @@ for (const versioned of [false, true]) {
     assert.deepEqual(f.gets, [f.path], 'the pre-write body read during the write is not reused');
     f.gets.length = 0;
     await f.api.loadAllLogs();
-    assert.deepEqual(f.gets, [], 'a settled day is cached again');
+    assert.deepEqual(f.gets, [f.path], 'the runtime remains the freshness owner after a write settles');
   });
 }
 
 test('history reloaded during a conflict recovery write shows the recovered day afterwards', async (t) => {
   const f = await heldDayWrite(t, { versioned: true });
-  await f.api.loadAllLogs(); // registers conflict recovery and caches the day
+  await f.api.loadAllLogs(); // registers conflict recovery and reads the day
   const recovery = f.conflict()({
     path: f.path,
     conflictContext: { kind: 'habits-day-entry', id: 'recover-1', habitId: 'walk', operation: 'set', value: 4 },
@@ -484,4 +492,137 @@ test('deleting a habit purges it from a day written while history was reloading'
   };
   await f.api.purgeHabit('read');
   assert.deepEqual(purged, [f.path], 'the purge saw the day that now holds the habit');
+});
+
+// CI supplies the platform frontend checkout alongside its shared dependencies.
+// These tests run the real outbox/mirror, not an app-level approximation of it.
+const frontendModules = process.env.MOBIUS_FRONTEND_NODE_MODULES;
+for (const value of [4, null]) {
+  test(`runtime rejection refreshes history after a queued ${value === null ? 'deletion and purge' : 'mutation'}`, {
+    skip: !frontendModules && 'set MOBIUS_FRONTEND_NODE_MODULES to run the actual-runtime regressions',
+  }, async (t) => {
+    const globals = ['window', 'document', 'navigator', 'fetch', 'indexedDB', 'IDBKeyRange', 'crypto'];
+    const previous = new Map(globals.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+    let runtime;
+    t.after(() => {
+      runtime?._destroy();
+      for (const [key, descriptor] of previous) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else delete globalThis[key];
+      }
+    });
+    const frontend = resolve(frontendModules, '..');
+    const { freshEnv } = await import(pathToFileURL(resolve(frontend, 'src/lib/__tests__/mobiusRuntimeHarness.mjs')));
+    const { makeStorage } = await import(pathToFileURL(resolve(frontend, 'public/mobius-runtime.js')));
+    delete globalThis.window;
+    const { server } = freshEnv();
+    const date = '2030-06-01';
+    const path = `logs/${date}.json`;
+    // Only synthetic intent metadata is large; public history stays small.
+    const raw = { walk: 1, _mobius: { padding: 'x'.repeat(66 * 1024) } };
+    server.seed(path, raw);
+    const size = Buffer.byteLength(JSON.stringify(raw));
+    assert.ok(size > 64 * 1024);
+    let metadataOnlyLists = 0;
+    // The shared server supplies JSON bodies but not backend file metadata or
+    // its per-file inline cap. Model those at the HTTP boundary; leave runtime
+    // overlay, durable queue, rejection and reconciliation completely intact.
+    globalThis.fetch = async (...args) => {
+      const response = await server.fetch(...args);
+      if (!args[0].includes('/apps-list/') || !response.ok) return response;
+      const body = await response.json();
+      for (const entry of body.entries) {
+        entry.modified_at = '2030-06-01T00:00:00Z';
+        entry.size = Buffer.byteLength(JSON.stringify(server.serverValue(entry.path)));
+        if (entry.size > 64 * 1024) {
+          delete entry.content;
+          metadataOnlyLists += 1;
+        }
+      }
+      return { ...response, json: async () => body };
+    };
+    const payload = Buffer.from(JSON.stringify({ scope: 'app', app_id: '1', rev: '1' })).toString('base64url');
+    runtime = makeStorage({ appId: '1', getToken: async () => `header.${payload}.signature` });
+    window.mobius = { storage: runtime, runtimeFeatures: { authoritativeVersionedReads: true }, online: true };
+    const api = await import(`./storage.js?runtime-rejection=${value}`);
+
+    server.forceWrite(path, 503);
+    await api.setEntry(date, 'walk', value);
+    assert.equal(await runtime.pendingCount(), 1);
+    assert.deepEqual((await api.loadAllLogs())[date], value === null ? {} : { walk: 4 });
+    assert.equal(metadataOnlyLists, 1);
+    assert.deepEqual(server.serverValue(path), raw, 'the transient failure never changes the server file');
+
+    server.forceWrite(path, 422);
+    await runtime._drain();
+    assert.equal(await runtime.pendingCount(), 0);
+    assert.equal((await runtime.get(path)).walk, 1, 'runtime reconciled the refused overlay');
+    assert.deepEqual(server.serverValue(path), raw, 'rejection leaves the same server body and stamp');
+    if (value === null) {
+      // Do not reload first: purge itself must discover the restored habit
+      // after history previously saw an empty public day during queued delete.
+      await api.purgeHabit('walk');
+      assert.equal(Object.hasOwn(server.serverValue(path), 'walk'), false);
+      assert.deepEqual(server.serverValue(path)._mobius, raw._mobius);
+      assert.deepEqual((await api.loadAllLogs())[date], {});
+    } else {
+      assert.deepEqual((await api.loadAllLogs())[date], { walk: 1 });
+    }
+    assert.ok(metadataOnlyLists >= 2);
+  });
+}
+
+test('history batches metadata-only reads eight at a time and skips inline and non-day entries', async (t) => {
+  const previousWindow = globalThis.window;
+  t.after(() => { globalThis.window = previousWindow; });
+  const files = Array.from({ length: 19 }, (_, index) => {
+    const name = `2030-07-${String(index + 1).padStart(2, '0')}.json`;
+    return { name, path: `logs/${name}`, type: 'file' };
+  });
+  let active = 0;
+  let maximum = 0;
+  const reads = [];
+  globalThis.window = { mobius: { storage: {
+    listWithStatus: async (_prefix, options) => {
+      assert.deepEqual(options, { includeContent: true });
+      return { complete: true, entries: [
+        ...files,
+        { name: '2030-07-20.json', path: 'logs/2030-07-20.json', type: 'file', content: { walk: 2 } },
+        { name: 'nested.json', path: 'logs/nested.json', type: 'directory' },
+        { name: 'readme.txt', path: 'logs/readme.txt', type: 'file' },
+      ] };
+    },
+    get: async (path) => {
+      reads.push(path);
+      maximum = Math.max(maximum, ++active);
+      // All reads started in this batch remain active for a full turn.
+      await new Promise((resolve) => setImmediate(resolve));
+      active -= 1;
+      return { walk: 1, _mobius: { applied: [] } };
+    },
+  } } };
+  const logs = await loadAllLogs();
+  assert.equal(maximum, 8);
+  assert.deepEqual(reads, files.map((entry) => entry.path));
+  assert.equal(Object.keys(logs).length, 20);
+  assert.deepEqual(logs['2030-07-01'], { walk: 1 });
+  assert.deepEqual(logs['2030-07-20'], { walk: 2 });
+});
+
+test('legacy history listing remains unavailable offline and reloads runtime bodies online', async (t) => {
+  const previousWindow = globalThis.window;
+  t.after(() => { globalThis.window = previousWindow; });
+  let day = { walk: 1 };
+  let reads = 0;
+  globalThis.window = { mobius: { online: false, storage: {
+    list: async () => [{ name: '2030-08-01.json', path: 'logs/2030-08-01.json', type: 'file' }],
+    get: async () => { reads += 1; return day; },
+  } } };
+  assert.equal(await loadAllLogs(), null);
+  assert.equal(reads, 0);
+  window.mobius.online = true;
+  assert.deepEqual(await loadAllLogs(), { '2030-08-01': { walk: 1 } });
+  day = { walk: 2 };
+  assert.deepEqual(await loadAllLogs(), { '2030-08-01': { walk: 2 } });
+  assert.equal(reads, 2);
 });

@@ -68,7 +68,7 @@ function ensureDayConflictRecovery() {
   recoveredIntents = new Set();
   if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads !== true
       || !storage?.onConflict || !storage?.getWithVersion || !storage?.durableWrite) return;
-  detachRecovery = storage.onConflict((conflict) => changingDayLog(String(conflict?.path || ''), async () => {
+  detachRecovery = storage.onConflict(async (conflict) => {
     const context = conflict?.conflictContext;
     const intents = conflictContexts(context);
     if (!/^logs\/\d{4}-\d{2}-\d{2}\.json$/.test(String(conflict?.path || ''))
@@ -110,7 +110,7 @@ function ensureDayConflictRecovery() {
       }
     }
     return false;
-  }));
+  });
 }
 
 // Local-calendar date string (the user's "today"); domain treats date strings as
@@ -202,12 +202,8 @@ export function adjustEntry(dateStr, habitId, deltaRaw, floor = 0) {
 
 async function writeDayIntent(dateStr, intent) {
   ensureDayConflictRecovery();
-  const path = logPath(dateStr);
-  return changingDayLog(path, () => writeDayIntentNow(path, intent));
-}
-
-async function writeDayIntentNow(path, intent) {
   const storage = window.mobius.storage;
+  const path = logPath(dateStr);
   if (window.mobius?.runtimeFeatures?.authoritativeVersionedReads === true
       && storage.getWithVersion && storage.durableWrite && storage.onConflict) {
     const current = await storage.getWithVersion(path, 'json');
@@ -322,47 +318,15 @@ export function clearTimerState(habitId) {
 
 // --- history (analytics screens) ---
 
-// History is reloaded on every open and every return to the app, and a year of
-// use is 365 day files. Bodies therefore come, in order, from the listing
-// itself (runtimes with `includeContent` inline small JSON files, queued local
-// writes overlaid), from `listedLogs` when the file's modified_at + size are
-// unchanged since this page last read it, or from a bounded batch of GETs.
-// Any local write or conflict on a day drops its entry, because a queued or
-// refused write can differ from the server body under the same server stamp,
-// and a reload that overlapped such a change does not refill the cache.
+// Inline small day files in one listing; bound reads for bodies omitted by
+// older runtimes or the server's inline limits. The runtime owns freshness:
+// queued overlays and reconciled bodies can share the same server file stamp.
 const LOG_READ_BATCH_SIZE = 8;
-const listedLogs = new Map(); // path -> { stamp, raw }
-let localLogChanges = 0;
-
-function forgetListedLog(path) {
-  localLogChanges += 1;
-  listedLogs.delete(path);
-}
-
-// A local change to a day spans its read, its write, and the runtime taking
-// the write. Forgetting the day at both ends means a reload that overlaps
-// either end does not cache what it read, and one that ran entirely inside
-// the change is dropped when the change settles.
-async function changingDayLog(path, change) {
-  forgetListedLog(path);
-  try {
-    return await change();
-  } finally {
-    forgetListedLog(path);
-  }
-}
-
-function listedStamp(entry) {
-  return entry.modified_at && Number.isFinite(entry.size)
-    ? `${entry.modified_at}|${entry.size}`
-    : null;
-}
 
 // Enumerate every day-log and read it into { 'YYYY-MM-DD': { habitId: value } }.
 export async function loadAllLogs() {
   const storage = window.mobius.storage;
   ensureDayConflictRecovery();
-  const changesAtStart = localLogChanges;
   const listing = typeof storage.listWithStatus === 'function'
     ? await storage.listWithStatus('logs/', { includeContent: true })
     : { entries: await storage.list('logs/'), complete: window.mobius?.online !== false };
@@ -375,12 +339,8 @@ export async function loadAllLogs() {
   const bodies = new Map(); // path -> raw day log, or null when unreadable
   const toFetch = [];
   for (const entry of files) {
-    const stamp = listedStamp(entry);
-    const cached = stamp && listedLogs.get(entry.path);
     if (Object.prototype.hasOwnProperty.call(entry, 'content') && entry.content != null) {
       bodies.set(entry.path, entry.content);
-    } else if (cached && cached.stamp === stamp) {
-      bodies.set(entry.path, cached.raw);
     } else {
       toFetch.push(entry);
     }
@@ -392,16 +352,12 @@ export async function loadAllLogs() {
   }
   const out = {};
   let bodiesComplete = true;
-  listedLogs.clear();
-  const cacheable = localLogChanges === changesAtStart;
   for (const entry of files) {
     const raw = bodies.get(entry.path);
     if (!raw || typeof raw !== 'object') {
       bodiesComplete = false;
       continue;
     }
-    const stamp = listedStamp(entry);
-    if (stamp && cacheable) listedLogs.set(entry.path, { stamp, raw });
     out[entry.name.replace(/\.json$/, '')] = publicDayLog(raw);
   }
   return bodiesComplete ? out : null;
