@@ -331,26 +331,29 @@ test('metadata-only history reloads follow runtime bodies even under unchanged s
   assert.deepEqual(gets.sort(), ['logs/2030-01-01.json', 'logs/2030-01-02.json']);
 });
 
-test('history uses day bodies inlined by an includeContent listing', async (t) => {
+test('history reads the current runtime body instead of a stale inline listing snapshot', async (t) => {
   const previousWindow = globalThis.window;
   t.after(() => { globalThis.window = previousWindow; });
+  let current = { walk: 6, _mobius: { version: 1, applied: [] } };
   globalThis.window = {
     mobius: {
       online: true,
       storage: {
-        listWithStatus: async (_prefix, options) => ({
+        listWithStatus: async () => ({
           complete: true,
           source: 'server',
           entries: [{
             name: '2030-02-01.json', path: 'logs/2030-02-01.json', type: 'file',
-            ...(options?.includeContent ? { content: { walk: 5, _mobius: { version: 1, applied: [] } } } : {}),
+            content: { walk: 5 },
           }],
         }),
-        get: async () => { throw new Error('inline bodies must not be read again'); },
+        get: async () => current,
       },
     },
   };
-  assert.deepEqual(await loadAllLogs(), { '2030-02-01': { walk: 5 } });
+  assert.deepEqual(await loadAllLogs(), { '2030-02-01': { walk: 6 } });
+  current = null;
+  assert.equal(await loadAllLogs(), null, 'a stale inline body cannot stand in for an unavailable current body');
 });
 
 test('a history reload after an overlapping day write reads the new body', async (t) => {
@@ -497,25 +500,35 @@ test('deleting a habit purges it from a day written while history was reloading'
 // CI supplies the platform frontend checkout alongside its shared dependencies.
 // These tests run the real outbox/mirror, not an app-level approximation of it.
 const frontendModules = process.env.MOBIUS_FRONTEND_NODE_MODULES;
+let runtimeTestModule = 0;
+async function actualRuntime(t) {
+  const globals = ['window', 'document', 'navigator', 'fetch', 'indexedDB', 'IDBKeyRange', 'crypto'];
+  const previous = new Map(globals.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  let runtime;
+  t.after(() => {
+    runtime?._destroy();
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  });
+  const frontend = resolve(frontendModules, '..');
+  const { freshEnv } = await import(pathToFileURL(resolve(frontend, 'src/lib/__tests__/mobiusRuntimeHarness.mjs')));
+  const { makeStorage } = await import(pathToFileURL(resolve(frontend, 'public/mobius-runtime.js')));
+  delete globalThis.window;
+  const { server } = freshEnv();
+  const payload = Buffer.from(JSON.stringify({ scope: 'app', app_id: '1', rev: '1' })).toString('base64url');
+  runtime = makeStorage({ appId: '1', getToken: async () => `header.${payload}.signature` });
+  window.mobius = { storage: runtime, runtimeFeatures: { authoritativeVersionedReads: true }, online: true };
+  const api = await import(`./storage.js?actual-runtime=${++runtimeTestModule}`);
+  return { server, runtime, api };
+}
+
 for (const value of [4, null]) {
   test(`runtime rejection refreshes history after a queued ${value === null ? 'deletion and purge' : 'mutation'}`, {
     skip: !frontendModules && 'set MOBIUS_FRONTEND_NODE_MODULES to run the actual-runtime regressions',
   }, async (t) => {
-    const globals = ['window', 'document', 'navigator', 'fetch', 'indexedDB', 'IDBKeyRange', 'crypto'];
-    const previous = new Map(globals.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
-    let runtime;
-    t.after(() => {
-      runtime?._destroy();
-      for (const [key, descriptor] of previous) {
-        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-        else delete globalThis[key];
-      }
-    });
-    const frontend = resolve(frontendModules, '..');
-    const { freshEnv } = await import(pathToFileURL(resolve(frontend, 'src/lib/__tests__/mobiusRuntimeHarness.mjs')));
-    const { makeStorage } = await import(pathToFileURL(resolve(frontend, 'public/mobius-runtime.js')));
-    delete globalThis.window;
-    const { server } = freshEnv();
+    const { server, runtime, api } = await actualRuntime(t);
     const date = '2030-06-01';
     const path = `logs/${date}.json`;
     // Only synthetic intent metadata is large; public history stays small.
@@ -541,10 +554,6 @@ for (const value of [4, null]) {
       }
       return { ...response, json: async () => body };
     };
-    const payload = Buffer.from(JSON.stringify({ scope: 'app', app_id: '1', rev: '1' })).toString('base64url');
-    runtime = makeStorage({ appId: '1', getToken: async () => `header.${payload}.signature` });
-    window.mobius = { storage: runtime, runtimeFeatures: { authoritativeVersionedReads: true }, online: true };
-    const api = await import(`./storage.js?runtime-rejection=${value}`);
 
     server.forceWrite(path, 503);
     await api.setEntry(date, 'walk', value);
@@ -572,7 +581,7 @@ for (const value of [4, null]) {
   });
 }
 
-test('history batches metadata-only reads eight at a time and skips inline and non-day entries', async (t) => {
+test('history batches all day reads eight at a time and ignores inline snapshots and non-day entries', async (t) => {
   const previousWindow = globalThis.window;
   t.after(() => { globalThis.window = previousWindow; });
   const files = Array.from({ length: 19 }, (_, index) => {
@@ -584,7 +593,7 @@ test('history batches metadata-only reads eight at a time and skips inline and n
   const reads = [];
   globalThis.window = { mobius: { storage: {
     listWithStatus: async (_prefix, options) => {
-      assert.deepEqual(options, { includeContent: true });
+      assert.equal(options, undefined);
       return { complete: true, entries: [
         ...files,
         { name: '2030-07-20.json', path: 'logs/2030-07-20.json', type: 'file', content: { walk: 2 } },
@@ -603,10 +612,10 @@ test('history batches metadata-only reads eight at a time and skips inline and n
   } } };
   const logs = await loadAllLogs();
   assert.equal(maximum, 8);
-  assert.deepEqual(reads, files.map((entry) => entry.path));
+  assert.deepEqual(reads, [...files.map((entry) => entry.path), 'logs/2030-07-20.json']);
   assert.equal(Object.keys(logs).length, 20);
   assert.deepEqual(logs['2030-07-01'], { walk: 1 });
-  assert.deepEqual(logs['2030-07-20'], { walk: 2 });
+  assert.deepEqual(logs['2030-07-20'], { walk: 1 });
 });
 
 test('legacy history listing remains unavailable offline and reloads runtime bodies online', async (t) => {
@@ -626,3 +635,46 @@ test('legacy history listing remains unavailable offline and reloads runtime bod
   assert.deepEqual(await loadAllLogs(), { '2030-08-01': { walk: 2 } });
   assert.equal(reads, 2);
 });
+
+for (const action of ['history', 'purge']) {
+  test(`runtime ${action} reads the current day after a write completes during listing`, {
+    skip: !frontendModules && 'set MOBIUS_FRONTEND_NODE_MODULES to run the actual-runtime regressions',
+  }, async (t) => {
+    const { server, runtime, api } = await actualRuntime(t);
+    const date = '2030-09-01';
+    const path = `logs/${date}.json`;
+    const initial = action === 'history' ? { walk: 1 } : { read: 2 };
+    server.seed(path, initial);
+    let release;
+    const held = new Promise((resolve) => { release = resolve; });
+    t.after(release);
+    let listingStarted;
+    const started = new Promise((resolve) => { listingStarted = resolve; });
+    let holdNextListing = true;
+    globalThis.fetch = async (...args) => {
+      const response = await server.fetch(...args);
+      if (!args[0].includes('/apps-list/') || !holdNextListing) return response;
+      holdNextListing = false;
+      // Capture the response before the concurrent write, as if the HTTP
+      // response were still in flight. All mirror/nonce/queue logic is real.
+      const body = structuredClone(await response.json());
+      listingStarted();
+      await held;
+      return { ...response, json: async () => body };
+    };
+    const operation = action === 'history' ? api.loadAllLogs() : api.purgeHabit('walk');
+    await started;
+    await api.setEntry(date, 'walk', 4);
+    await runtime._drain();
+    assert.equal(await runtime.pendingCount(), 0);
+    assert.equal(server.serverValue(path).walk, 4);
+    release();
+    const result = await operation;
+    if (action === 'history') {
+      assert.deepEqual(result[date], { walk: 4 });
+      assert.equal((await runtime.get(path)).walk, 4);
+    } else {
+      assert.deepEqual(server.serverValue(path), { read: 2 }, 'purge must scrub the entry saved during listing');
+    }
+  });
+}

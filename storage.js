@@ -318,9 +318,9 @@ export function clearTimerState(habitId) {
 
 // --- history (analytics screens) ---
 
-// Inline small day files in one listing; bound reads for bodies omitted by
-// older runtimes or the server's inline limits. The runtime owns freshness:
-// queued overlays and reconciled bodies can share the same server file stamp.
+// Read each day through the runtime after enumeration, in bounded batches.
+// Inline listing bodies can predate a write completed during the listing,
+// even when the runtime has already protected/reconciled its current mirror.
 const LOG_READ_BATCH_SIZE = 8;
 
 // Enumerate every day-log and read it into { 'YYYY-MM-DD': { habitId: value } }.
@@ -328,7 +328,7 @@ export async function loadAllLogs() {
   const storage = window.mobius.storage;
   ensureDayConflictRecovery();
   const listing = typeof storage.listWithStatus === 'function'
-    ? await storage.listWithStatus('logs/', { includeContent: true })
+    ? await storage.listWithStatus('logs/')
     : { entries: await storage.list('logs/'), complete: window.mobius?.online !== false };
   // A partial history is useful internally but unsafe as the authoritative
   // analytics/purge input. Keep the previous in-memory view until a complete
@@ -336,29 +336,17 @@ export async function loadAllLogs() {
   if (!listing || listing.complete !== true) return null;
   const files = (listing.entries || [])
     .filter((e) => e.type === 'file' && e.name.endsWith('.json'));
-  const bodies = new Map(); // path -> raw day log, or null when unreadable
-  const toFetch = [];
-  for (const entry of files) {
-    if (Object.prototype.hasOwnProperty.call(entry, 'content') && entry.content != null) {
-      bodies.set(entry.path, entry.content);
-    } else {
-      toFetch.push(entry);
-    }
-  }
-  for (let i = 0; i < toFetch.length; i += LOG_READ_BATCH_SIZE) {
-    await Promise.all(toFetch.slice(i, i + LOG_READ_BATCH_SIZE).map(async (entry) => {
-      bodies.set(entry.path, await storage.get(entry.path));
-    }));
-  }
   const out = {};
   let bodiesComplete = true;
-  for (const entry of files) {
-    const raw = bodies.get(entry.path);
-    if (!raw || typeof raw !== 'object') {
-      bodiesComplete = false;
-      continue;
-    }
-    out[entry.name.replace(/\.json$/, '')] = publicDayLog(raw);
+  for (let i = 0; i < files.length; i += LOG_READ_BATCH_SIZE) {
+    await Promise.all(files.slice(i, i + LOG_READ_BATCH_SIZE).map(async (entry) => {
+      const raw = await storage.get(entry.path);
+      if (!raw || typeof raw !== 'object') {
+        bodiesComplete = false;
+        return;
+      }
+      out[entry.name.replace(/\.json$/, '')] = publicDayLog(raw);
+    }));
   }
   return bodiesComplete ? out : null;
 }
